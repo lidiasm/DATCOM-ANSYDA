@@ -1,0 +1,493 @@
+---
+title: "Guión de Detección de Anomalías"
+author: "Lidia Sánchez Mérida"
+date: "2/11/2021"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(reshape)
+library(fitdistrplus)
+library(outliers)
+```
+
+## 2. Dataset y selección de variables
+Cargamos el dataset `mtcars` disponible en R directamente y lo filtramos por las columnas numéricas. Luego eliminamos aquellas con poca variedad de valores y también si tienen valores perdidos.
+
+```{r}
+# Cargamos el conjunto de datos
+datos = mtcars
+head(datos)
+# Obtenemos las columnas numéricas
+columnas.num = sapply(c(1:ncol(datos)) , function(x) is.numeric(datos[, x]))
+# Construimos un nuevo dataset 
+datos.num = datos[, columnas.num]
+head(datos.num)
+# Eliminamos las variables con poca variabilidad de datos
+datos.num  = datos.num[,-c(2 , 8:11)]  
+head(datos.num)
+# Eliminamos registros con valores NAN
+datos.num = na.omit(datos.num)
+```
+
+## 3. Detección de outliers en una dimensión
+### 3.1. Outliers IQR
+
+Parece que la distribución de la mayoría de variables es similar a la distribución normal.
+
+```{r}
+# Grid 2x3
+par(mfrow = c(2,3))
+# Histogramas de las variables
+columnas.num = sapply(c(1:ncol(datos)) , function(x) hist(datos[, x], main="", xlab=names(datos)[x]))
+# Guardamos ciertas variables para usos posteriores
+indice.columna = 1
+columna = datos.num[, indice.columna]
+nombre.columna = names(datos.num) [indice.columna]
+```
+
+#### 3.1.1. Obtención de los outliers IQR
+
+Calculamos los Q1 y Q3 para luego obtener los intervalos que detectan tanto `outliers moderados como outliers extremos`.
+
+```{r}
+indice.columna
+nombre.columna
+# Q1 
+cuartil.primero = quantile(datos.num[, indice.columna], prob=seq(0.25, 0.25, 0))
+cuartil.primero
+# Q3 
+cuartil.tercero = quantile(datos.num[, indice.columna], prob=seq(0.75, 0.75, 0))
+cuartil.tercero
+# IQR 
+iqr = IQR(datos.num[, indice.columna])
+iqr
+# Intervalo de outliers moderados
+extremo.superior.outlier.IQR = cuartil.tercero + 1.5*iqr
+extremo.superior.outlier.IQR
+extremo.inferior.outlier.IQR = cuartil.primero - 1.5*iqr
+extremo.inferior.outlier.IQR
+# Intervalo de outliers extremos
+extremo.superior.outlier.IQR.extremo = cuartil.tercero + 3*iqr
+extremo.superior.outlier.IQR.extremo
+extremo.inferior.outlier.IQR.extremo = cuartil.primero - 3*iqr
+extremo.inferior.outlier.IQR.extremo
+# Buscar outliers moderados
+son.outliers.IQ = datos.num[, indice.columna] < extremo.inferior.outlier.IQR | datos.num[, indice.columna] > extremo.superior.outlier.IQR
+head(son.outliers.IQ)
+sum(son.outliers.IQ)
+# Buscar outliers extremos
+son.outliers.IQ.extremos = datos.num[, indice.columna] < extremo.inferior.outlier.IQR.extremo | datos.num[, indice.columna] > extremo.superior.outlier.IQR.extremo
+head(son.outliers.IQ.extremos)
+sum(son.outliers.IQ.extremos)
+```
+#### 3.1.2. Índices y valores de los outliers IQR
+
+Se obtienen los datasets que contienen tanto los `outliers moderados como los outliers extremos`.
+
+```{r}
+### OUTLIERS MODERADOS ###
+# Obtenemos los índices de las muestras con outliers. Solo hay 1 y tiene como índice el 20
+claves.outliers.IQR = which(son.outliers.IQ==TRUE)
+claves.outliers.IQR
+# Obtenemos el dataset con las muestras con outliers. Para ello utilizamos la variable anteriormente
+# creada que determina si cada registro es outlier o no
+df.outliers.IQR = datos %>% filter(son.outliers.IQ)
+df.outliers.IQR
+# Obtenemos los nombres de la fila
+nombres.outliers.IQR = rownames(df.outliers.IQR)
+nombres.outliers.IQR
+# Obtenemos los valores de la fila como vector
+valores.outliers.IQR = df.outliers.IQR[,1]
+valores.outliers.IQR
+
+### OUTLIERS EXTREMOS ###
+# Obtenemos los índices de las muestras con outliers. Solo hay 1 y tiene como índice el 20
+claves.outliers.IQR.extremos = which(son.outliers.IQ.extremos==TRUE)
+claves.outliers.IQR.extremos
+# Obtenemos el dataset con las muestras con outliers. Para ello utilizamos la variable anteriormente
+# creada que determina si cada registro es outlier o no
+df.outliers.IQR.extremos = datos %>% filter(son.outliers.IQ.extremos)
+df.outliers.IQR.extremos
+# Obtenemos los nombres de la fila
+nombres.outliers.IQR.extremos = rownames(df.outliers.IQR.extremos)
+nombres.outliers.IQR.extremos
+# Obtenemos los valores de la fila como vector
+valores.outliers.IQR.extremos = df.outliers.IQR.extremos[,1]
+valores.outliers.IQR.extremos
+```
+#### 3.1.3 Cómputo de los outliers IQR con funciones
+
+En esta sección se obtienen los mismos valores que en el apartado anterior pero con algunas funciones definidas.
+
+```{r}
+# Calcula los outliers IQR con respecto a una columna 
+# Devuelve un vector de bools indicando si el registro i-?simo 
+# de datos es o no un outlier IQR con respecto a la columna ind.columna
+# coef es 1.5 para los outliers normales y hay que pasarle 3 para los outliers extremos
+son_outliers_IQR = function (datos, ind.columna, coef = 1.5){
+  columna.datos = datos[,ind.columna]
+  cuartil.primero = quantile(columna.datos)[2]  
+  #quantile[1] es el m?nimo y quantile[5] el m?ximo.
+  cuartil.tercero = quantile(columna.datos)[4] 
+  iqr = cuartil.tercero - cuartil.primero
+  extremo.superior.outlier = (iqr * coef) + cuartil.tercero
+  extremo.inferior.outlier = cuartil.primero - (iqr * coef)
+  son.outliers.IQR  = columna.datos > extremo.superior.outlier |
+    columna.datos < extremo.inferior.outlier
+  return (son.outliers.IQR)
+}
+
+
+# Funci?n an?loga a son_outliers_IQR, salvo que devuelve un vector
+# de claves en vez de un vector de bools
+claves_outliers_IQR = function(datos, ind.columna, coef = 1.5){
+  columna.datos = datos[,ind.columna]
+  son.outliers.IQR = son_outliers_IQR(datos, ind.columna, coef)
+  return (which(son.outliers.IQR  == TRUE))
+}
+
+# Obtenemos todos los datos anteriores pero con las funciones definidas en este chunk
+son.outliers.IQR = son_outliers_IQR(datos.num, indice.columna)
+head(son.outliers.IQR)
+claves.outliers.IQR  = claves_outliers_IQR (datos.num, indice.columna)
+claves.outliers.IQR
+son.outliers.IQR.extremos = son_outliers_IQR (datos.num, indice.columna, 3)
+head(son.outliers.IQR.extremos)
+claves.outliers.IQR.extremos = claves_outliers_IQR (datos.num, indice.columna, 3)
+claves.outliers.IQR.extremos
+```
+#### 3.1.4 Desviación de los outliers con respecto a la media de la columna
+
+En este apartado se pretende considerar si un valor es outlier en dos situaciones diferentes:
+
+1. La situación estándar en la que se consideran intervalos [-2, 2] para outliers moderados y [-3, 3] para outliers extremos. Estos intervalos se suelen utilizar para **variables que sigan tanto una normal como una similar.**
+
+2. Una segunda situación que se basa en los intervalos calculados a partir del IQR. Estos valores **solo se utilizan para variables con distribuciones normales o variables con distribuciones similares, o que al menos no rechacen los tests de normalidad.**
+
+```{r}
+# Escalamos el dataset de variables numéricas
+datos.num.norm = scale(datos.num)
+head(datos.num.norm)
+# Obtenemos los datos escalados de la columna `mpg`
+columna.norm = datos.num.norm[, indice.columna]
+columna.norm
+# Obtenemos los valores normalizados de los outliers
+valores.outliers.IQR.norm = columna.norm[claves.outliers.IQR]
+valores.outliers.IQR.norm
+# Obtenemos todos los datos normalizados del outlier encontrado
+datos.num.norm.outliers.IQR = datos.num.norm[claves.outliers.IQR,]
+datos.num.norm.outliers.IQR
+```
+
+#### 3.1.5 Gráfico
+
+En esta sección se grafican los datos normalizados los **outliers moderados y extremos**.
+
+```{r}
+# Realiza un plot de todos los registros
+# Permite cambiar el color con el que se visualiza un conjunto de registros. 
+# Los registros que se muestran con otro color se especifican en el par?metro
+# claves.a.mostrar 
+plot_2_colores = function (datos, 
+                           claves.a.mostrar, 
+                           titulo = "",
+                           colores = c("black", "red")){
+  
+  num.datos = nrow(as.matrix(datos))
+  seleccionados =  rep(FALSE, num.datos)
+  seleccionados[claves.a.mostrar] = TRUE
+  colores.a.mostrar = rep(colores[1], num.datos)
+  colores.a.mostrar [seleccionados] = colores[2]
+  
+  plot(datos, col=colores.a.mostrar, main = titulo)
+}
+# Outliers moderados y extremos 
+plot_2_colores(datos.num$mpg, claves.outliers.IQR)
+plot_2_colores(datos.num$mpg, claves.outliers.IQR.extremos)
+```
+#### 3.1.6 Diagramas de cajas
+
+En principio mostramos los diagramas de cajas de la variable `mpg` con los datos sin normalizar y los datos normalizados puesto que este proceso no afecta a su posición. En rojo aparece el `outlier moderado` que hemos identificado anteriormente.
+
+```{r}
+# funci?n base para diag_caja_outliers_IQR y diag_caja
+diag_caja_grafico_base = function(datos, indice.columna){
+  # Importante: Para que aes busque los par?metros en el ?mbito local, 
+  # debe incluirse  environment = environment()
+  nombre.columna = colnames(datos)[indice.columna]
+  ggboxplot = ggplot(data = as.data.frame(datos), 
+                     aes(x=factor(""), 
+                         y = datos[,indice.columna]) , 
+                     environment = environment()) + 
+              xlab(nombre.columna) + ylab("") 
+  return (ggboxplot)
+}
+
+# Muestra un diagrama de caja
+# Calcula los outliers IQR y los muestra como puntos en rojo en un BoxPlot
+diag_caja_outliers_IQR = function (datos, ind.columna, coef.IQR = 1.5){
+  # Si quisi?semos l?neas horizontales en los l?mites de las cajas
+  # habr?a que a?adir 
+  # + stat_boxplot(geom = 'errorbar')   
+   outliers.IQR = son_outliers_IQR(datos, ind.columna, coef = coef.IQR)
+   ggboxplot =  diag_caja_grafico_base(datos, ind.columna) + 
+                stat_boxplot(coef = coef.IQR) +
+                geom_boxplot(coef = coef.IQR, outlier.colour = "red") 
+                # Importante: geom_boxplot debe ir despu?s de stat_boxplot
+   
+   return (ggboxplot)
+}
+# Representamos los diagramas de cajas para la variable `mpg` sin normalizar y normalizada
+diag_caja_outliers_IQR(datos.num, indice.columna)
+diag_caja_outliers_IQR(datos.num.norm, indice.columna)
+```
+
+Ahora realizamos la misma representación anterior pero mostrando el nombre del `outlier moderado`.
+
+```{r}
+# Muestra un diagrama de caja
+# Tambi?n muestra las etiquetas de los registros indicados en 
+# el par?metro claves.a.mostrar 
+diag_caja = function (datos, ind.columna, claves.a.mostrar = c()){
+  num.filas = nrow(datos)
+  num.claves = length(claves.a.mostrar)
+  nombres.filas = vector (mode = "character", length = num.filas)
+  nombres.filas = rep("", num.filas)
+  nombres.claves = nombres_filas(datos, claves.a.mostrar)
+  
+  for (i in 1:num.claves)
+    nombres.filas[claves.a.mostrar[i]]  = nombres.claves[i]
+  
+  ggboxplot = diag_caja_grafico_base(datos, ind.columna) + 
+    geom_boxplot(outlier.shape = NA) + # Para que no imprima los outliers IQR calculados dentro del mismo geom_boxplot
+    geom_text(aes(label = nombres.filas)) 
+  
+  return (ggboxplot)
+}
+
+# Devuelve los nombres de aquellas filas especificadas en el par?metro claves
+# filas es un vector de bools 
+nombres_filas = function (datos, claves) {
+  num.claves = length(claves)
+  nombres.filas = row.names(as.data.frame(datos))[claves]
+  
+  return (nombres.filas)
+}
+# Realizamos la misma representación anterior pero dibujando el outlier
+diag_caja(datos.num, indice.columna, claves.outliers.IQR)
+```
+A continuación representamos los `outliers` encontrados en cada una de las variables del dataset. Se demuestra que **mientras una muestra puede ser un `outlier` para una columna, para el resto puede que no lo sea.**
+
+```{r}
+# Muestra de forma conjunta todos los diagramas de caja de las variables de datos
+# Para ello, normaliza previamente los datos.
+# Tambi?n muestra las etiquetas de los registros indicados en claves.a.mostrar
+# Requiere reshape
+diag_caja_juntos = function (datos, titulo = "", claves.a.mostrar = c()){  
+  # Importante: Para que aes busque los par?metros en el ?mbito local, 
+  # debe incluirse  environment = environment()
+  
+  # Para hacerlo con ggplot, lamentablemente hay que construir antes una tabla 
+  # que contenga en cada fila el valor que a cada tupla le da cada variable 
+  # -> paquete reshape->melt
+  
+  # Por ejemplo, si tenemos el siguiente data frame
+  
+  # datos = data.frame(
+  #   A = c(1, 2),
+  #   B = c(3, 4)
+  # )
+  # datos =
+  #     A  B
+  #     1  3
+  #     2  4
+  
+  # melt(datos) construye esta tabla:
+  
+  #      variable value
+  # 1        A     1
+  # 2        A     2
+  # 3        B     3
+  # 4        B     4
+  
+  nombres.de.filas = nombres_filas (datos, claves.a.mostrar)
+  datos = scale(datos)
+  datos.melted = melt(datos)
+  colnames(datos.melted)[2]="Variables"
+  colnames(datos.melted)[3]="zscore"
+  factor.melted = colnames(datos.melted)[1]
+  columna.factor = as.factor(datos.melted[,factor.melted])
+  levels(columna.factor)[!levels(columna.factor) %in% nombres.de.filas] = ""
+  
+  ggplot(data = datos.melted, 
+         aes(x=Variables, y=zscore), 
+         environment = environment()) + 
+    ggtitle(titulo) + 
+    geom_boxplot(outlier.shape = NA) + 
+    geom_text(aes(label = columna.factor), size = 3) 
+}
+diag_caja_juntos(datos, claves.a.mostrar=claves.outliers.IQR)
+```
+### 3.2. Tests de hipótesis
+
+#### 3.2.1. Objetivo
+
+El objetivo en este apartado consiste en confirmar o rechazar que el dato encontrado anteriormente es verdaderamente un `outlier`. En primer lugar comprobamos gráficamente que la columna en la que lo hemos encontrado sigue una distribución normal o similar.
+
+```{r}
+ajusteNormal = fitdist(columna, "norm")
+denscomp (ajusteNormal,  xlab = nombre.columna)
+```
+#### 3.2.3 Test de Grubbs
+
+A continuación planteamos la hipótesis nula de que no es un outlier y la hipótesis alternativa que sí que lo es. Como el `p-value=0.55` y por tanto no es menor que `alpha=0.05` no se rechaza la hipótesis nula por lo que **no se puede confirmar que sea un ´outlier`**. De este modo, solo nos queda comprobar **cuál es el valor que más se aleja de la media**. Para ello lo vemos con la función `outlier()`.
+
+```{r}
+test.de.Grubbs = grubbs.test(columna, two.sided = TRUE)
+test.de.Grubbs$p.value
+# Valor más lejano de la media
+valor.posible.outlier = outlier(columna)
+valor.posible.outlier
+es.posible.outlier = outlier(columna, logical = TRUE)
+es.posible.outlier
+clave.posible.outlier = which( es.posible.outlier == TRUE)
+clave.posible.outlier
+```
+#### 3.2.4 Test de Normalidad
+
+Ahora trabajaremos con otro dataset para intentar ver la distribución que siguen las variables **tras eliminar los outliers**. Para ello planteamos una H0=la distribución es normal y H1=la distribución no es normal.
+
+```{r}
+# Nuevo dataset
+datos.artificiales = c(45,56,54,34,32,45,67,45,67,65,140)
+# Detectamos el outlier
+test.de.Grubbs = grubbs.test(datos.artificiales, two.sided = TRUE)
+test.de.Grubbs$p.value
+# Obtenemos el dato outlier
+valor.posible.outlier = outlier(datos.artificiales)
+valor.posible.outlier
+es.posible.outlier = outlier(datos.artificiales, logical = TRUE)
+es.posible.outlier
+clave.posible.outlier = which(es.posible.outlier == TRUE)
+clave.posible.outlier
+```
+Eliminamos el anterior `outlier` detectado para comprobar la normalidad de los datos. Como el `p-value=0.7` **no se puede rechazar la H0 por lo que se puede asumir que los datos siguen una distribución normal**.
+
+```{r}
+# Eliminamos el outlier del dataset
+datos.artificiales.sin.outlier = datos.artificiales[-clave.posible.outlier]
+datos.artificiales.sin.outlier
+# Test de normalidad
+shapiro.test(datos.artificiales.sin.outlier)
+goodness_fit = gofstat(ajusteNormal)
+goodness_fit$adtest
+```
+
+A continuación se implementa una función que aplique todo el procedimiento anterior siguiendo estos pasos:
+
+1. Aplicamos el test de Grubbs para ver si hay `outliers` en la columna proporcionada.
+2. A continuación obtenemos los `outliers` encontrados así como sus posiciones dentro del dataset.
+3. Comapramos su distribución con la normal. Si lo es, podremos aplicar el test de `Shapiro` para comprobar si la variable sigue una distribución normal tras eliminar los `outliers` encontrados.
+
+```{r}
+# Aplica el test de Grubbs sobre la columna ind.col de datos y devuelve una lista con:
+# nombre.columna: Nombre de la columna datos[, ind.col]
+# clave.mas.alejado.media: Clave del valor O que está más alejado de la media
+# valor.mas.alejado.media: Valor de O en datos[, ind.col]
+# nombre.mas.alejado.media: Nombre de O en datos
+# es.outlier: TRUE/FALSE dependiendo del resultado del test de Grubbs sobre O
+# p.value:  p-value calculado por el test de Grubbs
+# es.distrib.norm: Resultado de aplicar el test de Normalidad 
+#    de Shapiro-Wilks sobre datos[, ind.col]
+#    El test de normalidad se aplica sin tener en cuenta el 
+#    valor más alejado de la media (el posible outlier O)
+#    TRUE si el test no ha podido rechazar
+#       -> Sólo podemos concluir que los datos no contradicen una Normal
+#    FALSE si el test rechaza 
+#       -> Los datos no siguen una Normal
+test_Grubbs = function(data.frame, indice.columna, alpha = 0.05) {
+  # Aplicamos el test de Grubbs
+  test.de.Grubbs = grubbs.test(data.frame[, indice.columna], two.sided = TRUE)
+  # Buscamos las posiciones de los valores más alejados de la media
+  posibles.outliers = outlier(data.frame[, indice.columna], logical = TRUE)
+  clave.mas.alejado.media = which(posibles.outliers == TRUE)
+  valor.mas.alejado.media = data.frame[clave.mas.alejado.media, indice.columna]
+  # Test de normalidad sin los outliers
+  data.frame.sin.outlier = data.frame[-clave.mas.alejado.media, indice.columna]
+  shapiro.resultados = shapiro.test(data.frame.sin.outlier)
+
+  # Valores a devolver
+  result = data.frame(
+    nombre.columna=names(data.frame)[indice.columna],
+    clave.mas.alejado.media=clave.mas.alejado.media,
+    valor.mas.alejado.media=valor.mas.alejado.media,
+    es.outlier=test.de.Grubbs$p.value < 0.05,
+    p.value=test.de.Grubbs$p.value,
+    p.value.test.normalidad=shapiro.resultados$p.value,
+    es.distrib.norm=shapiro.resultados$p.value > 0.05
+  )
+  return (result)
+}
+
+# Aplicamos la función anterior
+df.datos.artificiales = as.data.frame(datos.artificiales)
+test.Grubbs.datos.artificiales = test_Grubbs(df.datos.artificiales, 1)
+test.Grubbs.datos.artificiales
+```
+### 3.3 Trabajando con varias columnas
+
+#### 3.3.1 Outliers IQR
+
+En este apartado se pretenden calcular los `outliers` a partir de **IQR** para detectarlos con respecto a cada una de las variables de un dataset.
+
+```{r}
+# Calcula los outliers IQR con respecto a ALGUNA columna
+# Devuelve un vector de claves indicando si el registro i-?simo 
+# de datos es o no un outlier IQR con respecto a ALGUNA columna
+# coef es 1.5 para los outliers normales y  3 para los outliers extremos
+claves_outliers_IQR_en_alguna_columna = function(datos, coef = 1.5){
+  df.clave.columnas = data.frame()
+  claves.outliers =  sapply(1:ncol(datos), 
+                               function(x) claves_outliers_IQR(datos, x, coef)
+  )
+  claves.outliers.en.alguna.columna = unlist(claves.outliers)
+  return (claves.outliers.en.alguna.columna)
+}
+# Obtenemos los registros outliers con respecto a alguna columna
+claves.outliers.IQR.en.alguna.columna = claves_outliers_IQR_en_alguna_columna(datos.num, 1.5)
+claves.outliers.IQR.en.alguna.columna
+# Eliminamos registros repetidos por haber sido outliers en varias columnas
+claves.outliers.IQR.en.mas.de.una.columna = 
+  unique(
+    claves.outliers.IQR.en.alguna.columna[
+      duplicated(claves.outliers.IQR.en.alguna.columna)])
+claves.outliers.IQR.en.mas.de.una.columna
+claves.outliers.IQR.en.alguna.columna = 
+  unique (claves.outliers.IQR.en.alguna.columna)
+claves.outliers.IQR.en.alguna.columna 
+nombres_filas(datos.num, claves.outliers.IQR.en.mas.de.una.columna)
+# Mostramos los nombres de los coches outliers para alguna de las variables
+nombres_filas(datos.num, claves.outliers.IQR.en.alguna.columna)
+# Valores normalizados de estos outliers
+outliers.norm.frame = datos.num.norm[claves.outliers.IQR.en.alguna.columna, ]
+# Representamos los diagramas de cajas de todas las variables con los outliers
+diag_caja_juntos(datos.num.norm, claves.a.mostrar=claves.outliers.IQR.en.alguna.columna)
+```
+
+#### 3.3.2 Tests de Hipótesis (OPCIONAL)
+
+En este apartado el objetivo consiste en aplicar la función `test_Grubbs` definida anteriormente para aplicar el **test de Grubbs sobre todas las variables** y comprobar si siguen o no una distribución normal o similar. Como podemos observar en los resultados, las **variables `disp` y `drat` han dado negativo en el test por lo que se rechaza la hipótesis nula de ser variables normales.
+
+```{r}
+# Representamos las distribuciones de los datos normalizados
+par(mfrow = c(3,3))
+sapply(c(1:ncol(datos.num)) , function(x) denscomp (fitdist(datos.num[, x], "norm"), main="", xlab=x))
+# Aplicamos el test de Grubbs a todas las variables
+sapply(c(1:ncol(datos.num)) , function(x) test_Grubbs(datos.num, x))
+```
+## 4. Outliers Multivariantes
+
+
