@@ -1,0 +1,163 @@
+---
+title: "Guión de prácticas para Reglas de Asociación"
+author: "Lidia Sánchez Mérida"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+# Cargamos las librerías necesarias
+library(arules)
+library(arulesViz)
+library(colorspace)
+library(pmml)
+```
+
+En este guión de prácticas el objetivo consiste en encontrar y estudiar las reglas de asociación existentes en el dataset `AdultUCI`.
+
+```{r}
+# Cargamos el dataset
+data("AdultUCI")
+# Dimensiones
+dim(AdultUCI)
+# Vemos las dos primeras filas para ver sus tipos
+AdultUCI[1:2,]
+```
+
+De los 6 atributos continuos, eliminamos `fnlwgt` y `eduaction-num` porque aportan información redundante. Los 4 restantes los dividimos en intervalos porque los algoritmos para extraer los reglas **solo admiten variables nominales**. 
+
+```{r}
+# Eliminamos las variables redundantes
+AdultUCI[["fnlwgt"]] = NULL
+AdultUCI[["education-num"]] = NULL
+# Convertimos las 4 variables numéricas a nominales mediante intervalos
+AdultUCI[[ "age"]] = ordered( cut (AdultUCI[[ "age"]], c(15,25,45,65,100) ) ,
+labels = c ("Young", "Middle-aged", "Senior", "Old"))
+AdultUCI[[ "hours-per-week"]] = ordered( cut ( AdultUCI[[ "hours-per-week"]], c(0,25,40,60,168)),labels = c("Part-time", "Full-time", "Over-time", "Workaholic"))
+AdultUCI[[ "capital-gain"]] = ordered( cut ( AdultUCI[[ "capital-gain"]], c(-Inf,0,median(AdultUCI[[
+"capital-gain"]][AdultUCI[[ "capital-gain"]]>0]), Inf) ) , labels = c("None", "Low", "High"))
+AdultUCI[[ "capital-loss"]] = ordered( cut ( AdultUCI[[ "capital-loss"]], c(-Inf,0, median(AdultUCI[[
+"capital-loss"]][AdultUCI[[ "capital-loss"]]>0]), Inf) ) , labels = c("None", "Low", "High"))
+# Pasamos el dataframe a transacciones
+Adult <- as(AdultUCI, "transactions")
+Adult
+# Resumen de la BBDD
+summary(Adult)
+```
+
+Ahora representamos gráficamente la distribución de los items en las transacciones utilizando el dataset `Epub` puesto que `Adult` tiene un valor por cada atributo.
+
+```{r}
+data("Epub")
+summary(Epub)
+# Si el gráfico se ve vacío/blanco, es culpa del renderizado de Rstudio. Si hacemos zoom sí que podremos verlo bien.
+image(Epub)
+```
+
+A continuación veremos los items más importantes a través de su frecuencia con un **soporte mínimo de 0.1**. Podemos obtener las siguientes conclusiones:
+
+* La población es mayoritariamente joven, puesto que en su mayoría son jóvenes y de mediana edad.
+* Por otro lado, la gran mayoría se clasifica entre casados y solteros.
+* Como podemos observar, solo aparecen personas de raza blanca, lo cual es sospechoso teniendo en cuesta de que el país de origen es EEUU.
+* La mayoría de la población no tienen ni ganancias ni pérdidas económicas, lo cual parece ser bastante extraño.
+* Hay una mayor cantidad de hombres que de mujeres, por lo que los datos parecen estar desbalanceados en esta categoría.
+* La gran mayoría de personas trabajan a jornada completa.
+
+```{r}
+itemFrequencyPlot(Adult, support = 0.1, cex.names=0.8)
+```
+
+A continuación aplicamos el algoritmo **apriori con soporte=0.1** para obtener los itemsets frecuentes. Tal y como se observa en la gráfica en la que se representan los itemsets frecuentes de tamaño 1, la cantidad de items que los componen es brutal. Por ello vamos a obtener únicamente los **itemsets maximales**-
+
+```{r}
+iAdult <- apriori(Adult, parameter = list(support = 0.1, target="frequent"))
+iAdult <- sort(iAdult, by="support") # Los ordenamos por el valor del soporte
+inspect(head(iAdult, n=10)) # Inspeccionamos los 10 primeros
+# Dibujamos los itemsets frecuentes obtenidos
+size(iAdult)
+barplot(table(size(iAdult)), xlab="itemset size", ylab="count") 
+inspect(iAdult[size(iAdult)==1])
+```
+
+Como podemos apreciar, existe una gran cantidad aún de itemsets frecuentes y cerrados, pero un menor número de itemsets maximales.
+
+```{r}
+# Itemsets maximales
+imaxAdult <- iAdult[is.maximal(iAdult)]
+inspect(head(sort(imaxAdult, by="support")))
+# Itemsets cerrados
+icloAdult <- iAdult[is.closed(iAdult)]
+inspect(head(sort(icloAdult, by="support")))
+# Gráfico de ambos
+barplot( c(frequent=length(iAdult), closed=length(icloAdult),
+maximal=length(imaxAdult)), ylab="count", xlab="itemsets")
+```
+Volvemos a aplicar **apriori con soporte=0.1 y confianza=0.8** especificando además una longitud mínima para cada regla de 2, de modo que garantice la existencia de un antecedente y un consecuente. Posteriormente podemos ordenar las reglas según diferentes medidas y estudiar subconjuntos de ellas especificando uno o varias condiciones. 
+
+En caso de tener **reglas redundantes**, se recomienda eliminar aquellas más complejas para quedarnos con las más sencillas puesto que aumenta la interpretabilidad de los resultados
+
+```{r}
+rules <- apriori(Adult, parameter = list(support = 0.1, confidence = 0.8, minlen = 2))
+summary(rules)
+inspect(head(rules))
+# Ordenamos las reglas por confianza
+rulesSorted = sort(rules, by = "confidence")
+inspect(head(rulesSorted))
+# Eliminamos reglas redundantes
+redundant <- is.redundant(x = rulesSorted, measure = "confidence")
+rulesPruned <- rulesSorted[!redundant] # remove redundant rules
+# Subconjunto de reglas por una condición -> lift > 1.2 && lhs: race=White
+rulesRaceWhite <- subset(rules, subset = lhs %in% "race=White" & lift > 1.2)
+inspect(head(rulesRaceWhite))
+```
+Existen otras medidas de calidad para evaluar las reglas obtenidas que son listadas mediante el comando `??interestMeasure`. 
+
+```{r}
+# Calculamos otras medidas de calidad para las reglas podadas anteriormente
+mInteres <- interestMeasure(rulesPruned, measure=c("hyperConfidence", "leverage"
+,"phi", "gini"), transactions=Adult)
+quality(rulesPruned) <- cbind(quality(rulesPruned), mInteres)
+inspect(head(sort(rulesPruned, by="phi")))
+```
+A continuación realizamos varios gráficos de ejemplo que ayudan a analizar los resultados de las reglas obtenidas. En el primero de ellos podemos observar el conjunto de reglas divididas mediante el **grado de confianza, el soporte y el valor de lift**. Dependiendo de lo que estemos estudiando, podremos centrarnos en un subconjunto de reglas u otro. 
+
+1. En caso de estar **detectando anomalías**, podríamos obtener aquellas reglas con un soporte de entre el 15-45%, que representan sucesos poco frecuentes y que son normalmente los objetivos de estudio para analizar la situación de negocios. 
+
+2. Por otro lado, podríamos estar interesados en estudiar aquellas reglas que disponen de valores de confianza y lift más altos pero que, sin embargo, tienen soportes muy bajos.
+
+```{r}
+# Gráfico que representa las reglas según las medidas de calidad: soporte, confianza y lift.
+plot(rulesPruned)
+```
+
+Ahora dibujamos otro tipo de gráfico para representar unas cuantas reglas en función del soporte (tamaño de los puntos) y el lift (color).
+
+```{r}
+plot(rulesPruned[1:6], method="graph")
+inspect(head(rulesSorted))
+```
+
+También podemos visualizarlas en forma de matriz y agrupando los antecedentes por clusteres, también especificando el tamaño por el soporte y el color según el valor de lift.
+
+```{r}
+plot(rulesPruned, method="grouped")
+```
+
+Por último, también se pueden visualizar los antecedentes y consecuentes como flechas para representar cómo se relacionan los diferentes items entre sí. 
+
+```{r}
+plot(rulesPruned[1:6], method="paracoord", reorder=TRUE,
+control=list(col=sequential_hcl(100)))
+```
+
+Finalmente, podemos almacenar las reglas obtenidas en un fichero como texto plano o en formato `PMML` para luego exportarlo en otro tipo de softwares sin necesidad de volverlas a generar.
+
+```{r}
+# Almacenamos las reglas podadas en un fichero CSV
+write(rulesPruned, file="reglas.csv", sep = ",")
+# Almacenamos las reglas podadas en un fichero PMML
+write.PMML(rulesPruned, file="reglas.pmml")
+```

@@ -1,7 +1,6 @@
 ---
-title: "Guión de Detección de Anomalías"
+title: "Guión de prácticas para la Detección de Anomalías"
 author: "Lidia Sánchez Mérida"
-date: "2/11/2021"
 output: pdf_document
 ---
 
@@ -11,6 +10,16 @@ library(tidyverse)
 library(reshape)
 library(fitdistrplus)
 library(outliers)
+library(MVN)
+library(CerioliOutlierDetection)
+library(mvoutlier)
+library(ggbiplot)
+library(DDoutlier)
+library(cluster)
+
+# Importamos todas las funciones del script `OutliersFunciones_byCubero.R`
+setwd("~/Escritorio/ANSDA/Prácticas Anomalías")
+source("OutliersFunciones_byCubero.R")
 ```
 
 ## 2. Dataset y selección de variables
@@ -123,32 +132,6 @@ valores.outliers.IQR.extremos
 En esta sección se obtienen los mismos valores que en el apartado anterior pero con algunas funciones definidas.
 
 ```{r}
-# Calcula los outliers IQR con respecto a una columna 
-# Devuelve un vector de bools indicando si el registro i-?simo 
-# de datos es o no un outlier IQR con respecto a la columna ind.columna
-# coef es 1.5 para los outliers normales y hay que pasarle 3 para los outliers extremos
-son_outliers_IQR = function (datos, ind.columna, coef = 1.5){
-  columna.datos = datos[,ind.columna]
-  cuartil.primero = quantile(columna.datos)[2]  
-  #quantile[1] es el m?nimo y quantile[5] el m?ximo.
-  cuartil.tercero = quantile(columna.datos)[4] 
-  iqr = cuartil.tercero - cuartil.primero
-  extremo.superior.outlier = (iqr * coef) + cuartil.tercero
-  extremo.inferior.outlier = cuartil.primero - (iqr * coef)
-  son.outliers.IQR  = columna.datos > extremo.superior.outlier |
-    columna.datos < extremo.inferior.outlier
-  return (son.outliers.IQR)
-}
-
-
-# Funci?n an?loga a son_outliers_IQR, salvo que devuelve un vector
-# de claves en vez de un vector de bools
-claves_outliers_IQR = function(datos, ind.columna, coef = 1.5){
-  columna.datos = datos[,ind.columna]
-  son.outliers.IQR = son_outliers_IQR(datos, ind.columna, coef)
-  return (which(son.outliers.IQR  == TRUE))
-}
-
 # Obtenemos todos los datos anteriores pero con las funciones definidas en este chunk
 son.outliers.IQR = son_outliers_IQR(datos.num, indice.columna)
 head(son.outliers.IQR)
@@ -187,23 +170,6 @@ datos.num.norm.outliers.IQR
 En esta sección se grafican los datos normalizados los **outliers moderados y extremos**.
 
 ```{r}
-# Realiza un plot de todos los registros
-# Permite cambiar el color con el que se visualiza un conjunto de registros. 
-# Los registros que se muestran con otro color se especifican en el par?metro
-# claves.a.mostrar 
-plot_2_colores = function (datos, 
-                           claves.a.mostrar, 
-                           titulo = "",
-                           colores = c("black", "red")){
-  
-  num.datos = nrow(as.matrix(datos))
-  seleccionados =  rep(FALSE, num.datos)
-  seleccionados[claves.a.mostrar] = TRUE
-  colores.a.mostrar = rep(colores[1], num.datos)
-  colores.a.mostrar [seleccionados] = colores[2]
-  
-  plot(datos, col=colores.a.mostrar, main = titulo)
-}
 # Outliers moderados y extremos 
 plot_2_colores(datos.num$mpg, claves.outliers.IQR)
 plot_2_colores(datos.num$mpg, claves.outliers.IQR.extremos)
@@ -213,33 +179,6 @@ plot_2_colores(datos.num$mpg, claves.outliers.IQR.extremos)
 En principio mostramos los diagramas de cajas de la variable `mpg` con los datos sin normalizar y los datos normalizados puesto que este proceso no afecta a su posición. En rojo aparece el `outlier moderado` que hemos identificado anteriormente.
 
 ```{r}
-# funci?n base para diag_caja_outliers_IQR y diag_caja
-diag_caja_grafico_base = function(datos, indice.columna){
-  # Importante: Para que aes busque los par?metros en el ?mbito local, 
-  # debe incluirse  environment = environment()
-  nombre.columna = colnames(datos)[indice.columna]
-  ggboxplot = ggplot(data = as.data.frame(datos), 
-                     aes(x=factor(""), 
-                         y = datos[,indice.columna]) , 
-                     environment = environment()) + 
-              xlab(nombre.columna) + ylab("") 
-  return (ggboxplot)
-}
-
-# Muestra un diagrama de caja
-# Calcula los outliers IQR y los muestra como puntos en rojo en un BoxPlot
-diag_caja_outliers_IQR = function (datos, ind.columna, coef.IQR = 1.5){
-  # Si quisi?semos l?neas horizontales en los l?mites de las cajas
-  # habr?a que a?adir 
-  # + stat_boxplot(geom = 'errorbar')   
-   outliers.IQR = son_outliers_IQR(datos, ind.columna, coef = coef.IQR)
-   ggboxplot =  diag_caja_grafico_base(datos, ind.columna) + 
-                stat_boxplot(coef = coef.IQR) +
-                geom_boxplot(coef = coef.IQR, outlier.colour = "red") 
-                # Importante: geom_boxplot debe ir despu?s de stat_boxplot
-   
-   return (ggboxplot)
-}
 # Representamos los diagramas de cajas para la variable `mpg` sin normalizar y normalizada
 diag_caja_outliers_IQR(datos.num, indice.columna)
 diag_caja_outliers_IQR(datos.num.norm, indice.columna)
@@ -248,87 +187,12 @@ diag_caja_outliers_IQR(datos.num.norm, indice.columna)
 Ahora realizamos la misma representación anterior pero mostrando el nombre del `outlier moderado`.
 
 ```{r}
-# Muestra un diagrama de caja
-# Tambi?n muestra las etiquetas de los registros indicados en 
-# el par?metro claves.a.mostrar 
-diag_caja = function (datos, ind.columna, claves.a.mostrar = c()){
-  num.filas = nrow(datos)
-  num.claves = length(claves.a.mostrar)
-  nombres.filas = vector (mode = "character", length = num.filas)
-  nombres.filas = rep("", num.filas)
-  nombres.claves = nombres_filas(datos, claves.a.mostrar)
-  
-  for (i in 1:num.claves)
-    nombres.filas[claves.a.mostrar[i]]  = nombres.claves[i]
-  
-  ggboxplot = diag_caja_grafico_base(datos, ind.columna) + 
-    geom_boxplot(outlier.shape = NA) + # Para que no imprima los outliers IQR calculados dentro del mismo geom_boxplot
-    geom_text(aes(label = nombres.filas)) 
-  
-  return (ggboxplot)
-}
-
-# Devuelve los nombres de aquellas filas especificadas en el par?metro claves
-# filas es un vector de bools 
-nombres_filas = function (datos, claves) {
-  num.claves = length(claves)
-  nombres.filas = row.names(as.data.frame(datos))[claves]
-  
-  return (nombres.filas)
-}
 # Realizamos la misma representación anterior pero dibujando el outlier
 diag_caja(datos.num, indice.columna, claves.outliers.IQR)
 ```
 A continuación representamos los `outliers` encontrados en cada una de las variables del dataset. Se demuestra que **mientras una muestra puede ser un `outlier` para una columna, para el resto puede que no lo sea.**
 
 ```{r}
-# Muestra de forma conjunta todos los diagramas de caja de las variables de datos
-# Para ello, normaliza previamente los datos.
-# Tambi?n muestra las etiquetas de los registros indicados en claves.a.mostrar
-# Requiere reshape
-diag_caja_juntos = function (datos, titulo = "", claves.a.mostrar = c()){  
-  # Importante: Para que aes busque los par?metros en el ?mbito local, 
-  # debe incluirse  environment = environment()
-  
-  # Para hacerlo con ggplot, lamentablemente hay que construir antes una tabla 
-  # que contenga en cada fila el valor que a cada tupla le da cada variable 
-  # -> paquete reshape->melt
-  
-  # Por ejemplo, si tenemos el siguiente data frame
-  
-  # datos = data.frame(
-  #   A = c(1, 2),
-  #   B = c(3, 4)
-  # )
-  # datos =
-  #     A  B
-  #     1  3
-  #     2  4
-  
-  # melt(datos) construye esta tabla:
-  
-  #      variable value
-  # 1        A     1
-  # 2        A     2
-  # 3        B     3
-  # 4        B     4
-  
-  nombres.de.filas = nombres_filas (datos, claves.a.mostrar)
-  datos = scale(datos)
-  datos.melted = melt(datos)
-  colnames(datos.melted)[2]="Variables"
-  colnames(datos.melted)[3]="zscore"
-  factor.melted = colnames(datos.melted)[1]
-  columna.factor = as.factor(datos.melted[,factor.melted])
-  levels(columna.factor)[!levels(columna.factor) %in% nombres.de.filas] = ""
-  
-  ggplot(data = datos.melted, 
-         aes(x=Variables, y=zscore), 
-         environment = environment()) + 
-    ggtitle(titulo) + 
-    geom_boxplot(outlier.shape = NA) + 
-    geom_text(aes(label = columna.factor), size = 3) 
-}
 diag_caja_juntos(datos, claves.a.mostrar=claves.outliers.IQR)
 ```
 ### 3.2. Tests de hipótesis
@@ -444,18 +308,6 @@ test.Grubbs.datos.artificiales
 En este apartado se pretenden calcular los `outliers` a partir de **IQR** para detectarlos con respecto a cada una de las variables de un dataset.
 
 ```{r}
-# Calcula los outliers IQR con respecto a ALGUNA columna
-# Devuelve un vector de claves indicando si el registro i-?simo 
-# de datos es o no un outlier IQR con respecto a ALGUNA columna
-# coef es 1.5 para los outliers normales y  3 para los outliers extremos
-claves_outliers_IQR_en_alguna_columna = function(datos, coef = 1.5){
-  df.clave.columnas = data.frame()
-  claves.outliers =  sapply(1:ncol(datos), 
-                               function(x) claves_outliers_IQR(datos, x, coef)
-  )
-  claves.outliers.en.alguna.columna = unlist(claves.outliers)
-  return (claves.outliers.en.alguna.columna)
-}
 # Obtenemos los registros outliers con respecto a alguna columna
 claves.outliers.IQR.en.alguna.columna = claves_outliers_IQR_en_alguna_columna(datos.num, 1.5)
 claves.outliers.IQR.en.alguna.columna
@@ -489,5 +341,192 @@ sapply(c(1:ncol(datos.num)) , function(x) denscomp (fitdist(datos.num[, x], "nor
 sapply(c(1:ncol(datos.num)) , function(x) test_Grubbs(datos.num, x))
 ```
 ## 4. Outliers Multivariantes
+
+### 4.1. Métodos estadísticos basados en la distancia de Mahalanobis
+
+El objetivo de este cuarto apartado es encontrar los valores *outliers* utilizando métodos estadísticos que nos garanticen su naturaleza. Por lo tanto, la **hipótesis nula es que no es un outlier** para que si rechaza confirmemos que lo es.
+
+#### 4.1.1 Hipótesis de Normalidad
+
+Para aplicar los métodos basados en la **distancia de Mahalanobis** todas las variables deben seguir una distribución normal univariante y multivariante en conjunto. Por ello se debe aplicar un test de normalidad multivariante. Al tener un p-valor menor que el umbral=0.05 se rechaza la hipótesis nula y por tanto **no siguen una distribución normal multivariante** por lo que no se debería aplicar dicho método.
+
+```{r}
+# Obtenemos las columnas que siguen una distribución normal
+resultados = sapply(c(1:ncol(datos.num)), function(x)test_Grubbs(datos.num, x))
+son.col.normales = unlist(resultados[7, ]) # unlist() = list->vector
+son.col.normales
+# Construimos un dataset solo con las columnas que siguen una distribución normal
+datos.num.distrib.norm = datos.num[,unlist(son.col.normales)] 
+datos.num.distrib.norm
+# Test de normalidad multivariante
+test.MVN = mvn(datos.num.distrib.norm, mvnTest = "energy")
+test.MVN$multivariateNormality["MVN"]
+test.MVN$multivariateNormality["p value"]
+```
+
+#### 4.1.2 Tests de hipótesis para detectar outliers
+
+```{r}
+# Comparación de la detección de outliers utilizando una técnica clásica y otra más robusta
+mvoutlier::corr.plot(datos.num[,1], datos.num[,2])
+```
+En primer lugar aplicamos un **test individual** para calcular los outliers con mayor distancia de Mahalanobis al resto de los datos. Como resultado obtenemos cuatro valores outliers. Mientras que con un **test múltiple** con una penalización concreta probamos si cada valor es un outlier o no. En este conjunto de test no se obtiene ningún outlier.
+
+```{r}
+set.seed(2)
+# Aplicamos un test individual con 0.05
+test.individual = cerioli2010.fsrmcd.test(datos.num.distrib.norm, signif.alpha=0.05)
+claves.test.individual = unlist(which(test.individual$outliers))
+claves.test.individual
+nombres.test.individual = nombres_filas(datos.num.distrib.norm, claves.test.individual)
+nombres.test.individual
+# Aplicamos múltiples tests con una corrección de Sidak
+test.interseccion = cerioli2010.fsrmcd.test(datos.num.distrib.norm, signif.alpha=1-(((1-0.05)^(1/dim(datos.num.distrib.norm)[1]))))
+claves.test.interseccion = unlist(which(test.interseccion$outliers))
+claves.test.interseccion
+nombres.test.interseccion = nombres_filas(datos.num.distrib.norm, claves.test.interseccion)
+nombres.test.interseccion
+# Ordenamos decrecientemente el vector de outliers para ver cuál es el mayor
+test.individual$mahdist
+clave.mayor.dist.Mah = order(test.individual$mahdist.rw, decreasing=TRUE)[1]
+clave.mayor.dist.Mah
+nombre.mayor.dist.Mah = test.individual$mahdist[clave.mayor.dist.Mah]
+nombre.mayor.dist.Mah
+# Mostramos las distancias de Mahalanobis
+plot(sort(test.individual$mahdist))
+```
+### 4.2 Visualización de datos con un Biplot
+
+Los gráficos **BiPlot** permiten hacernos una idea aproximada de los valores de las muestras con respecto a todas las variables además de las correlaciones entre sí.
+
+```{r}
+biplot.outliers.IQR = biplot_2_colores(datos.num, 
+                                       claves.outliers.IQR.en.alguna.columna, 
+                                       titulo.grupo.a.mostrar = "Outliers IQR",
+                                       titulo ="Biplot Outliers IQR")
+biplot.outliers.IQR
+```
+### 4.3 Métodos basados en distancias: LOF
+
+Los métodos basados en distancia se utilizan cuando se desea buscar `outliers` y no se cumplen las condiciones de normalidad. Por defecto, se utiliza la distancia Euclídea. Para ello se deberán normalizar los datos previamente puesto que estos métodos son sensibles a las escalas de las variables.
+
+```{r}
+# Aplicamos LOF con k=5
+num.vecinos.lof = 5
+lof.scores = LOF(datos.num.norm, k = num.vecinos.lof)
+# Ordenamos los scores decrecientemente y mostragmos un gráfico
+sorted.lof.scores = sort(lof.scores, decreasing=TRUE)
+plot(sorted.lof.scores)
+# Obtenemos los tres valores más extremos que aparecen en el gráfico
+num.outliers = 3
+claves.outliers.lof = sapply(c(1:num.outliers), function(x) which(lof.scores==sorted.lof.scores[x]))
+claves.outliers.lof
+nombres.outliers.lof = nombres_filas(datos.num.norm, claves.outliers.lof)
+nombres.outliers.lof
+# Mostramos los valores normalizados de los registros
+datos.num.norm[claves.outliers.lof, ]
+```
+Vamos a analizar las interacciones existentes entre cada par de variables destacando en rojo el outlier con mayor valor hasta el momento.
+
+```{r}
+clave.max.outlier.lof = claves.outliers.lof[1]
+colores = rep("black", times = nrow(datos.num.norm))
+colores[clave.max.outlier.lof] = "red"
+pairs(datos.num.norm, pch = 19,  cex = 0.5, col = colores, lower.panel = NULL)
+```
+Según parece existe una correlación entre las dos primeras variables en las que el outlier se sitúa en mitad pero bastante aislado del resto de muestras. Lo mismo ocurre entre `drat` y `qsec`. Por esta razón es por la que quizás se esté catalogando como valor extremo. A continuación dibujamos un **BiPlot** con todas las variables marcando en rojo cuáles son los valores outliers descubiertos hasta el momento.
+
+```{r}
+biplot.max.outlier.lof = biplot_2_colores(datos.num.norm, clave.max.outlier.lof, titulo = "Mayor outlier LOF")
+biplot.max.outlier.lof
+```
+### 4.4 Métodos basados en Clustering
+
+#### 4.4.1 Clustering usando k-means
+
+```{r}
+num.outliers = 5
+num.clusters = 3
+set.seed(2)
+kmeans.resultados = kmeans(datos.num.norm, num.clusters)
+asignaciones.clustering.kmeans = kmeans.resultados$cluster
+head(asignaciones.clustering.kmeans)
+centroides.normalizados = kmeans.resultados$centers
+centroides.normalizados
+# Centroides sin normalizar
+centroides.desnormalizados = desnormaliza(datos.num, centroides.normalizados)
+centroides.desnormalizados
+```
+Vamos a implementar una nueva función para calcular los *outliers* a partir de las distancias de todos los puntos a los centroides de sus clústeres. Como se puede observar en el `biplot` y en el diagrama de cajas, muchos puntos han sido categorizados como *outliers* por la acumulación de valores más o menos extremos en varias columnas, pero realmente no tienen por qué serlo.
+
+```{r}
+top_clustering_outliers = function(datos.normalizados, asignaciones.clustering,  datos.centroides.normalizados, num.outliers) {
+  distancias = distancias_a_centroides(datos.normalizados, asignaciones.clustering, datos.centroides.normalizados)
+  outliers = sort(distancias, decreasing=TRUE)[1:num.outliers]
+  claves = as.numeric(sapply(c(1:num.outliers), function(x) which(distancias==outliers[x])))
+  return(list(claves=claves, distancias=outliers))
+}
+top.outliers.kmeans = top_clustering_outliers(datos.num.norm, asignaciones.clustering.kmeans, centroides.normalizados, num.outliers)
+claves.outliers.kmeans = top.outliers.kmeans$claves 
+claves.outliers.kmeans
+nombres.outliers.kmeans = nombres_filas(datos.num, claves.outliers.kmeans)
+nombres.outliers.kmeans
+distancias.outliers.centroides = top.outliers.kmeans$distancias
+distancias.outliers.centroides
+# Mostramos un biplot con la información de los outliers y de los clusters
+biplot_outliers_clustering(datos.num, titulo = "Outliers k-means", asignaciones.clustering = asignaciones.clustering.kmeans, claves.outliers = claves.outliers.kmeans)
+# Diagrama de cajas
+diag_caja_juntos(datos.num, "Outliers k-means", claves.outliers.kmeans)
+```
+
+#### 4.4.2 Clustering usando medoides
+
+```{r}
+# Matriz de distancia todosxtodos
+set.seed(2)
+matriz.distancias = dist(datos.num.norm)
+modelo.pam = pam(matriz.distancias , k = num.clusters)
+# Mostramos las asignaciones de los clústeres y los medoides
+asignaciones.clustering.pam = modelo.pam$clustering   
+nombres.medoides = modelo.pam$medoids   
+nombres.medoides
+medoides = datos.num[nombres.medoides, ]
+medoides.normalizados = datos.num.norm[nombres.medoides, ]
+medoides.normalizados
+# Calculamos los X primero outliers
+top.outliers.kmedoides = top_clustering_outliers(datos.num.norm, asignaciones.clustering.pam, medoides.normalizados, num.outliers)
+claves.outliers.pam = top.outliers.kmedoides$claves
+claves.outliers.pam
+nombres.outliers.pam = top.outliers.kmedoides$distancias
+nombres.outliers.pam
+# Biplot
+biplot_outliers_clustering(datos.num, titulo = "Outliers k-medoids", asignaciones.clustering = asignaciones.clustering.pam, claves.outliers = claves.outliers.pam)
+```
+
+### 4.5 Análisis de los outliers multivariantes puros
+
+Calculamos los outliers multivariantes puros a partir de los detectados con el método `LOF` y con `IQR`.
+
+```{r}
+# Calculamos los outliers multivariantes puros
+claves.outliers.IQR.en.alguna.columna
+claves.outliers.lof
+claves.outliers.lof.no.IQR = setdiff(claves.outliers.lof, claves.outliers.IQR.en.alguna.columna)
+claves.outliers.lof.no.IQR
+nombres_filas(datos.num.norm, claves.outliers.lof.no.IQR)
+# Aumentamos el número de outliers 
+num.outliers = 11
+claves.outliers.IQR.en.alguna.columna
+claves.outliers.lof = sapply(c(1:num.outliers), function(x) which(lof.scores==sorted.lof.scores[1:num.outliers][x]))
+claves.outliers.lof
+claves.outliers.lof.no.IQR = setdiff(claves.outliers.lof, claves.outliers.IQR.en.alguna.columna)
+claves.outliers.lof.no.IQR
+nombres_filas(datos.num.norm, claves.outliers.lof.no.IQR)
+# Biplot
+result = biplot_2_colores(datos.num.norm, claves.outliers.lof.no.IQR)
+result
+# Datos normalizados de los outliers
+datos.num.norm[claves.outliers.lof.no.IQR, ]
+```
 
 
