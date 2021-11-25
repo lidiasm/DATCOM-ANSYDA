@@ -5,3 +5,5 @@
 1. Detección de Anomalías: en esta carpeta se encuentran los ficheros que contiene las funciones definidas para realizar el guión de prácticas para la parte de análsis de *outliers* y detección de anomalías. 
 
 2. Reglas de Asociación: en esta carpeta se encuentran los ficheros que contienen la implementación del guión de prácticas para esta parte del estudio de reglas de asociación.
+
+3. Clustering: en esta carpeta se encuentran los guiones de prácticas para los diferentes algoritmos de agrupación vistos en la asignatura para la detección de anomalías.
