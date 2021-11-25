@@ -1,0 +1,329 @@
+---
+title: "Implementación k-means con mlr"
+author: "Juan Gómez Romero"
+output:
+    html_document:
+      code_folding: "show"
+      toc: true
+      toc_depth: 2
+      toc_float: true
+      df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(knitr)
+library(tidyverse)
+library(mlr3verse)
+```
+
+# Carga de datos
+
+Cargamos el dataset [GvHD](https://rdrr.io/cran/mclust/man/GvHD.html), sección de control, en un [tibble](https://tibble.tidyverse.org) de [tidyverse](https://www.tidyverse.org).
+
+```{r load-data}
+data(GvHD, package = "mclust")
+gvhdTib_raw <- as_tibble(GvHD.control)
+gvhdTib_raw
+```
+
+# Preprocesamiento
+
+Aplicamos preprocesamiento básico:
+
+* Eliminar valores perdidos con na.omit() (no se elimina ninguno)
+* Escalar variables con [scale()](https://www.rdocumentation.org/packages/base/versions/3.6.2/topics/scale)
+
+```{r preprocess-data}
+print(paste0("Filas antes de preprocesamiento: ", nrow(gvhdTib_raw)))
+
+gvhdTib <- gvhdTib_raw %>%
+  na.omit() %>%
+  scale() %>%
+  as_tibble()
+
+head(gvhdTib)
+
+print(paste0("Filas después de preprocesamiento: ", nrow(gvhdTib)))
+```
+
+## Revisión del dataset
+
+```{r peek-data}
+summary(gvhdTib)
+```
+
+## Visualización
+
+Agrupación de muestras en individuo de control con dos variables (_CD4_ vs _CD8b_):
+
+```{r plot-data-control}
+ggplot(data = gvhdTib) +
+  geom_point(aes(x = CD4, y = CD8b)) +
+  labs(x = "CD4", y = "CD8b")
+```
+
+Agrupación de muestras en individuo de control vs individuo positivo con dos variables (_CD4_ vs _CD8b_, dos gráficos):
+
+```{r plot-data-controlVSpositive-1}
+gvhTib_positive <- GvHD.pos %>%
+  na.omit() %>%
+  scale() %>%
+  as_tibble() %>%
+  mutate(type = "positive")
+  
+gvhTib_control<- gvhdTib
+gvhTib_control$type = "control"
+
+gvhDTib_all <- rbind(gvhTib_positive, gvhTib_control)
+
+ggplot(data = gvhDTib_all) +
+  geom_point(aes(x = CD4, y = CD8b)) +
+  labs(x = "CD4", y = "CD8b") +
+  facet_wrap(~type)
+```
+
+Todas las agrupaciones (muestras de control):
+
+```{r plot-data-control-all}
+library(GGally)
+
+ggpairs(gvhdTib,
+        upper = list(continuous = "density"),
+        lower = list(continuous = wrap("points", size = 0.5)),
+        diag = list(continuous = "densityDiag")) +
+    theme_bw()
+```
+
+# Clústering
+
+## Calcular clústeres
+
+Calculamos los clústeres con [kmeans](https://mlr3cluster.mlr-org.com/reference/mlr_learners_clust.kmeans.html) de [mlr3cluster](https://mlr3cluster.mlr-org.com/index.html). mlr actúa aquí como _wrapper_ de la implementación estándar [stats::kmeans()](https://rdrr.io/r/stats/kmeans.html).
+
+```{r cluster-3centros}
+# task
+my_task <- TaskClust$new(id = "my_first_cluster", backend = gvhdTib)
+
+# learner
+my_learner <- lrn("clust.kmeans")
+my_learner$param_set$values <- list(centers = 3, algorithm = "Lloyd", iter.max = 100)
+
+# train
+my_learner$train(task = my_task)
+
+# resultado
+predictions <- my_learner$predict(my_task)
+```
+
+## Visualización de clústeres
+
+Podemos crear una visualización en 2 dimensiones de los clústeres, agregando a cada instancia el cluster asignado:
+
+```{r visualization-cluster-ggplot}
+gvhdTib_cluster <- gvhdTib %>%
+  mutate(group = predictions$partition) %>%
+  mutate(group = as.factor(group))
+
+ggplot(data = gvhdTib_cluster) +
+  geom_point(aes(x = CD4, y = CD8b, color = group)) +
+  labs(x = "CD4", y = "CD8b")
+```
+
+También podemos aprovechar las funciones específicas de visualización del paquete [mlr3viz](https://github.com/mlr-org/mlr3viz).
+
+```{r visualization-cluster-mlr3viz}
+library(mlr3viz)
+autoplot(predictions, my_task)
+autoplot(predictions, my_task, type = "pca", frame = TRUE)
+```
+
+# Ajustando el parámetro _k_
+Ajuste del número de clústeres basándonos en la medida de Davies-Bouldin, implementada como ["clust.db"](https://rdrr.io/github/mlr-org/mlr3cluster/man/mlr_measures_clust.db.html). Las medidas disponibles pueden consultarse [aquí](https://github.com/mlr-org/mlr3cluster).
+
+## Procedimiento simple
+
+Podemos aplicar el procedimiento simple y decir manualmente cuál es el mejor valor. La función [benchmark_grid()] permite comparar los resultados de varias _tasks_, _learners_ y _resamplings_. De hecho, podríamos comparar otros algoritmos diferentes a "clust.kmeans" con el parámetro _learners_.
+
+```{r adjust-k-simple}
+# diseñar benchmark
+k_values <- 3:6
+design <- benchmark_grid(
+  tasks = list(my_task),
+  learners = list(
+    lrn("clust.kmeans", centers = k_values[1]),
+    lrn("clust.kmeans", centers = k_values[2]),
+    lrn("clust.kmeans", centers = k_values[3]),
+    lrn("clust.kmeans", centers = k_values[4])),
+  resamplings = rsmp("insample"))
+print(design)
+
+# ejecutar benchmark
+benchmark_result <- benchmark(design)
+
+# definir y aplicar métrica
+measures <- list(msr("clust.db"))
+benchmark_result$aggregate(measures)  # <-- mejor valor: k=4 (segundo experimento)
+```
+
+Aplicando la técnica del codo, podemos determinar visualmente el valor adecuado de _k_. Sería conveniente repetir varias veces el experimento para que no influya la inicialización aleatoria inicial.
+
+```{r adjust-k-elbow}
+plot(k_values, benchmark_result$aggregate(measures)$clust.db,
+     type="b", pch = 19, frame = FALSE, 
+      xlab="Número de clústeres (k)",
+      ylab="Índice Davies-Bouldin")
+```
+
+Para algunas medidas, como el coeficiente de silueta, puede ser más interesante revisar un gráfico específico.
+
+```{r adjust-k-silueta}
+autoplot(predictions, my_task, type = "sil", frame = TRUE)
+```
+
+
+## Procedimiento simple con selección automática
+Podemos automatizar la selección de los mejores parámetros resultantes del _benchkmark_ definiendo un espacio de búsqueda parámetros con [ps()](https://paradox.mlr-org.com/reference/ps.html); por ejemplo _k_ = {2, ..., 10}:
+
+```{r adjust-k-search1}
+search_space <- ps(
+  centers = p_int(lower=2, upper=10)
+)
+```
+
+A partir del espacio de búsqueda, se construye la instancia del experimento. Puesto que solo vamos a utilizar un criterio de optimalidad, usamos [TuningInstanceSingleCrit](https://mlr3tuning.mlr-org.com/reference/TuningInstanceSingleCrit.html).
+
+```{r adjust-k-search2}
+instance <- TuningInstanceSingleCrit$new(
+  task = my_task,
+  learner = lrn("clust.kmeans"),
+  resampling = rsmp("insample"),
+  measure = msr("clust.db"),
+  search_space = search_space,
+  terminator = trm("evals", n_evals = 100)
+)
+```
+A continuación, se define el tipo de búsqueda en el espacio de parámetros que se quiere realizar con la clase [Tuner](https://mlr3book.mlr-org.com/optimization.html#tuning-algorithms).
+
+```{r adjust-k-search3}
+tuner <- tnr("grid_search")
+```
+
+Y, finalmente, se lanza la búsqueda con _optimize()_.
+
+```{r adjust-k-search4, message=FALSE, warning=FALSE, results=FALSE}
+tuner$optimize(instance)
+```
+
+Recuperamos el valor obtenido, que sería el adecuado para entrenar el modelo final.
+
+```{r adjust-k-search5}
+instance$result_learner_param_vals
+instance$result_y
+
+# --> train final model
+tsk2 <- TaskClust$new(id = "my_second_cluster", backend = gvhdTib)
+lrn2 <- lrn("clust.kmeans", 
+            centers = instance$result_learner_param_vals$centers[1],
+            algorithm = "Lloyd",
+            iter.max = 100)
+lrn2$train(task = tsk2)
+
+pred2 <- lrn2$predict(tsk2)
+autoplot(pred2, tsk2, type = "pca", frame = TRUE)
+```
+
+El proceso de búsqueda + entrenamiento del modelo puede realizarse en un solo paso con [AutoTuner](https://mlr3tuning.mlr-org.com/reference/AutoTuner.html).
+
+```{r adjust-k-auto, message=FALSE, warning=FALSE, results=FALSE}
+tsk3 <- TaskClust$new(id = "my_auto_cluster", backend = gvhdTib)
+lrn3 <- lrn("clust.kmeans")
+sp3  <- ps(centers = p_int(lower=2, upper=10))
+trm3 <- trm("evals", n_evals = 100)
+tnr3 <- tnr("grid_search")
+
+at <- AutoTuner$new(
+  learner = lrn3,
+  resampling = rsmp("insample"),
+  measure = msr("clust.db"),
+  search_space = sp3,
+  terminator = trm3,
+  tuner = tnr3
+)
+
+clst3 <- at$train(tsk3)
+
+pred3 <- clst3$predict(tsk3)
+autoplot(pred3, tsk3, type = "pca", frame = TRUE)
+```
+
+## Procedimiento complejo
+En los ejemplos anteriores, hemos utilizado todos los datos tanto para entrenar un modelo como para cálcular las métricas. Esto puede dar lugar a sesgos importantes. En el caso del clustering, sería interesante:
+
+1. Utilizar una partición de los datos para entrenamiento y otra para las métricas
+2. Dentro de la partición de entrenamiento, generar diversos modelos con diferentes semillas aleatorias
+
+La forma de incorporar estos procedimientos es mediante el argumento _resampling_, que hasta ahora hemos mantenido con el valor estándar `rsmp("insample")` (usar todos los datos, sin particiones). Así:
+
+1. `rsmp("holdout")` permite separar conjuntos de entrenamiento y validación/test
+2. `rsmp("cv")` permite realizar validación cruzada
+
+En la práctica, podemos reproducir el proceso de auto-ajuste anterior, pero seleccionando el número de clústeres _k_ en función de las métricas obtenidas sobre la partición de validación/test. 
+
+Esta partición es interna al procedimiento de auto-ajuste, por lo que si queremos trabajar con dos particiones desde el principio, como se haría en aprendizaje supervisado, habría que hacer esta división previamente con la función [resample()](https://mlr3.mlr-org.com/reference/resample.html).
+
+De este modo, podemos usar `"holdout"` (ejemplo con resampling interno):
+
+```{r adjust-k-holdout, results=FALSE, message=FALSE, warning=FALSE}
+tsk4  <- TaskClust$new(id = "my_auto_cluster_holdout", backend = gvhdTib)
+lrn4  <- lrn("clust.kmeans")
+sp4   <- ps(centers = p_int(lower=2, upper=10))
+trm4  <- trm("evals", n_evals = 100)
+tnr4  <- tnr("grid_search")
+
+at4 <- AutoTuner$new(
+  learner = lrn4,
+  resampling = rsmp("holdout", ratio = 0.8),   # inner resampling
+  measure = msr("clust.db"),
+  search_space = sp4,
+  terminator = trm4,
+  tuner = tnr4
+)
+
+clst4 <- at4$train(task = tsk4)
+
+pred4 <- clst4$predict(tsk4)   # predicción de todos, sin resampling
+autoplot(pred4, tsk4, type = "pca", frame = TRUE)
+```
+
+O podemos usar `"cv"` (ejemplo con resampling interno y externo):
+
+```{r adjust-k-cv, results=FALSE, message=FALSE, warning=FALSE}
+tsk5  <- TaskClust$new(id = "my_auto_cluster_holdout", backend = gvhdTib)
+lrn5  <- lrn("clust.kmeans")
+sp5   <- ps(centers = p_int(lower=2, upper=10))
+trm5  <- trm("evals", n_evals = 100)
+tnr5  <- tnr("grid_search")
+
+at5 <- AutoTuner$new(
+  learner = lrn5,
+  resampling = rsmp("cv", folds = 5),   # inner resampling
+  measure = msr("clust.db"),
+  search_space = sp4,
+  terminator = trm4,
+  tuner = tnr4
+)
+
+rsmp5 <- rsmp("holdout", ratio = 0.8)
+resample_result <- resample(tsk5, at5, rsmp5, store_models = TRUE)
+
+# mejor métrica obtenida con el conjunto de validación
+resample_result$score(measures = list(msr("clust.db")))  
+
+# modelo entrenado con todos los datos
+clst5 <- at5$train(task = tsk5)
+
+# predicción de todos, sin resampling
+pred5 <- clst5$predict(tsk5)  
+autoplot(pred5, tsk5, type = "pca", frame = TRUE)
+```

@@ -1,0 +1,145 @@
+---
+title: "Implementación clustering basado en densidad con mlr"
+author: "Juan Gómez Romero"
+output:
+    html_document:
+      code_folding: "show"
+      toc: true
+      toc_depth: 2
+      toc_float: true
+      df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(knitr)
+library(tidyverse)
+library(mlr3verse)
+library(mlr3viz)
+```
+
+# Carga de datos
+
+Cargamos el dataset [GvHD](https://rdrr.io/cran/mclust/man/GvHD.html), sección de control, en un [tibble](https://tibble.tidyverse.org) de [tidyverse](https://www.tidyverse.org).
+
+```{r load-data}
+data(GvHD, package = "mclust")
+gvhdTib_raw <- as_tibble(GvHD.control)
+gvhdTib_raw
+```
+
+# Preprocesamiento
+
+Aplicamos preprocesamiento básico:
+
+* Eliminar valores perdidos con na.omit() (no se elimina ninguno)
+* Escalar variables con [scale()](https://www.rdocumentation.org/packages/base/versions/3.6.2/topics/scale)
+
+```{r preprocess-data}
+print(paste0("Filas antes de preprocesamiento: ", nrow(gvhdTib_raw)))
+
+gvhdTib <- gvhdTib_raw %>%
+  na.omit() %>%
+  scale() %>%
+  as_tibble()
+
+head(gvhdTib)
+
+print(paste0("Filas después de preprocesamiento: ", nrow(gvhdTib)))
+```
+
+## Revisión del dataset
+
+```{r peek-data}
+summary(gvhdTib)
+```
+
+# Clústering basado en densidad con DBSCAN
+
+## Calcular clústeres
+
+Calculamos los clústeres con [dbscan](https://mlr3cluster.mlr-org.com/reference/mlr_learners_clust.dbscan.html) de [mlr3cluster](https://mlr3cluster.mlr-org.com/index.html). mlr actúa aquí como _wrapper_ de la implementación  [dbscan::predict.dbscan_fast()](https://rdrr.io/cran/dbscan/man/dbscan.html).
+
+```{r cluster-dbscan}
+# task
+my_task <- TaskClust$new(id = "my_first_dbscan_cluster", backend = gvhdTib)
+
+# learner
+my_learner <- lrn("clust.dbscan")
+my_learner$param_set$values <- list(eps = 1, minPts = 500)
+
+# train
+my_learner$train(task = my_task)
+
+# resultado
+predictions <- my_learner$predict(my_task)
+```
+
+## Visualización de clústeres
+Visualizamos los clústeres obtenidos con las funciones específicas de visualización del paquete [mlr3viz](https://github.com/mlr-org/mlr3viz).
+
+```{r visualization-agnes-mlr3viz}
+autoplot(predictions, my_task, type = "pca", frame = TRUE)
+```
+
+## Ajustar hiperparámetros _minPts_ y _eps_
+
+### Definir espacio de búsqueda
+En primer lugar, buscamos valores de referencia para los hiperparámetros:
+
+```{r adjust-hyper-dbscan-estimation1}
+minPts <- 1000
+```
+
+* _minPts_ es el número mínimo de objetos para constituir un cluster. Como heurística inicial, podemos definir un valor por debajo de $n/k$, para un número de clústeres $k$ estimado (`minPts`).
+
+* _eps_ es el valor de distancia de búsqueda para considerar las regiones de alta densidad. Para ello, podemos visualizar las distancias a los $k_{kNN}$ vecinos más cercanos (usamos también `minPts`).
+
+```{r adjust-hyper-dbscan-estimation2}
+library(dbscan)
+kNNdistplot(gvhdTib, k=minPts)
+abline(h = c(1.0, 3.5))   # puntos de codo observados manualmente
+```
+
+### Realizar búsqueda en el hiperespacio de parámetros
+Utilizamos de nuevo [AutoTuner](https://mlr3tuning.mlr-org.com/reference/AutoTuner.html) para ajustar automáticamente los hiperparámetros y seleccionar el mejor modelo
+
+```{r adjust-hyper-dbscan-auto, message=FALSE, warning=FALSE, results=FALSE}
+lrn <- lrn("clust.dbscan", eps = 1)
+sp  <- ps(eps    = p_dbl(lower=1.5, upper=3.5), 
+          minPts = p_int(lower=2500, upper=5000))   # valores algo más bajos para obtener >= 3 clústeres
+trm <- trm("evals", n_evals = 100)
+tnr <- tnr("grid_search")
+
+at <- AutoTuner$new(
+  learner = lrn,
+  resampling = rsmp("insample"),
+  measure = msr("clust.db"),
+  search_space = sp,
+  terminator = trm,
+  tuner = tnr
+)
+
+clst <- at$train(my_task)
+
+pred <- clst$predict(my_task)
+autoplot(pred, my_task, type = "pca", frame = TRUE)
+```
+
+# Clústering basado en densidad con OPTICS
+
+OPTICS no está disponible en mlr, por lo que utilizaremos directamente la implementación de [dbscan::optics()](https://www.rdocumentation.org/packages/dbscan/versions/0.9-8/topics/optics).
+
+```{r cluster-optics}
+library(dbscan)
+opt <- optics(gvhdTib, minPts = 1000)
+```
+
+A partir de objeto obtenido por el algoritmo se pueden determinar los clústeres. Esto puede hacerse visualmente o usando un hiperparámetros adicional _xi_, que modela el salto que debe producirse en el valor _reachability distance_ para considerar dos clústeres separados.
+
+```{r cluster-optics-particion}
+plot(opt)
+clst2 <- extractXi(opt, xi = 0.01)
+levels(factor(clst2$cluster))
+```
+

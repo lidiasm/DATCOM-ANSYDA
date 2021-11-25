@@ -1,0 +1,176 @@
+---
+title: "Implementación k-means básico"
+author: "Juan Gómez Romero"
+output:
+    html_document:
+      code_folding: "show"
+      toc: true
+      toc_depth: 2
+      toc_float: true
+      df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(knitr)
+library(factoextra)
+```
+
+# Carga de datos
+
+Cargamos el dataset [GvHD](https://rdrr.io/cran/mclust/man/GvHD.html), sección de control, en un [data frame](https://www.rdocumentation.org/packages/base/versions/3.6.2/topics/data.frame) de [R base](https://www.rdocumentation.org/packages/base/versions/3.6.2].
+
+```{r load-data}
+data(GvHD, package = "mclust")
+gvhdDf_raw <- data.frame(GvHD.control)
+gvhdDf_raw
+```
+
+# Preprocesamiento
+
+Aplicamos preprocesamiento básico:
+
+* Eliminar valores perdidos con na.omit() (no se elimina ninguno)
+* Escalar variables con [scale()](https://www.rdocumentation.org/packages/base/versions/3.6.2/topics/scale)
+
+```{r preprocess-data}
+print(paste0("Filas antes de preprocesamiento: ", nrow(gvhdDf_raw)))
+
+gvhdDf <- na.omit(gvhdDf_raw)
+gvhdDf <- scale(gvhdDf)
+gvhdDf <- data.frame(gvhdDf)
+head(gvhdDf)
+
+print(paste0("Filas después de preprocesamiento: ", nrow(gvhdDf)))
+```
+
+## Revisión del dataset
+
+```{r peek-data}
+summary(gvhdDf)
+```
+
+## Visualización
+
+Agrupación de muestras en individuo de control con dos variables (_CD4_ vs _CD8b_):
+
+```{r plot-data-control}
+ggplot(data = gvhdDf) +
+  geom_point(aes(x = CD4, y = CD8b)) +
+  labs(x = "CD4", y = "CD8b")
+```
+
+Agrupación de muestras en individuo de control vs individuo positivo con dos variables (_CD4_ vs _CD8b_, dos gráficos):
+
+```{r plot-data-controlVSpositive-1}
+gvhDf_positive <- data.frame(scale(na.omit(GvHD.pos)))
+gvhDf_positive$type = "positive"
+
+gvhDf_control<- gvhdDf
+gvhDf_control$type = "control"
+
+gvhDf_all <- rbind(gvhDf_positive, gvhDf_control)
+
+ggplot(data = gvhDf_all) +
+  geom_point(aes(x = CD4, y = CD8b)) +
+  labs(x = "CD4", y = "CD8b") +
+  facet_wrap(~type)
+```
+
+Agrupación de muestras en individuo de control vs individuo positivo con dos variables (_CD4_ vs _CD8b_, un gráfico):
+
+```{r plot-data-controlVSpositive-2}
+ggplot(data = gvhDf_all) +
+  geom_point(aes(x = CD4, y = CD8b, color = type)) +
+  labs(x = "CD4", y = "CD8b")
+```
+
+Todas las agrupaciones (muestras de control):
+
+```{r plot-data-control-all}
+library(GGally)
+
+ggpairs(gvhdDf,
+        upper = list(continuous = "density"),
+        lower = list(continuous = wrap("points", size = 0.5)),
+        diag = list(continuous = "densityDiag")) +
+    theme_bw()
+```
+
+
+# Clústering
+
+## Obtener matriz de distancias
+Volvemos a centrarnos en el subconjunto de muestras de control.
+
+Como paso previo al cálculo de los clústeres, podemos obtener las distancias entre todos los objetos del problema. Para ello, utilizamos del paquete [factoextra](https://www.rdocumentation.org/packages/factoextra/versions/1.0.7) las funciones [get_dist()](https://www.rdocumentation.org/packages/factoextra/versions/1.0.7/topics/dist) y [fviz_dist()](https://www.rdocumentation.org/packages/factoextra/versions/1.0.7/topics/dist):
+
+```{r distance-matrix-euclidean}
+# solo 10 individuos aleatorios
+distance <- get_dist(sample(as.matrix(gvhdDf), size = 10))
+head(distance)
+
+fviz_dist(distance)   
+```
+
+Por defecto se utiliza distancia euclídea como métrica de distancia; podemos cambiarla:
+
+```{r distance-matrix-pearson}
+# solo 10 individuos aleatorios
+distance <- get_dist(sample(as.matrix(gvhdDf), size = 10), "manhattan")
+head(distance)
+
+fviz_dist(distance)   
+```
+
+## Calcular clústeres
+
+Calculamos los clústeres con [k-means](https://www.rdocumentation.org/packages/stats/versions/3.6.2/topics/kmeans):
+
+```{r cluster-3centros}
+clustering <- kmeans(gvhdDf, centers = 3, algorithm = "Lloyd", iter.max = 100)
+str(clustering)
+# clustering
+```
+## Visualización de clústeres
+
+Podemos crear una visualización en 2 dimensiones de los clústeres, agregando a cada instancia el cluster asignado:
+
+```{r visualization-cluster-ggplot}
+gvhdDf_cluster <- gvhdDf
+gvhdDf_cluster$group = as.factor(clustering$cluster)
+
+ggplot(data = gvhdDf_cluster) +
+  geom_point(aes(x = CD4, y = CD8b, color = group)) +
+  labs(x = "CD4", y = "CD8b")
+```
+
+
+La función [fviz_cluster()](https://www.rdocumentation.org/packages/factoextra/versions/1.0.7/topics/fviz_cluster) también sirve para crear este tipo de visualizaciones. La función aplica primero PCA para seleccionar las dos componentes principales usadas, en lugar de trabajar con variables pre-seleccionadas:
+
+```{r visualization-cluster-fviz}
+fviz_cluster(clustering, data = gvhdDf)
+```
+
+# Ajustando el parámetro _k_
+Podemos calcular varias agrupaciones y observar cuál de ellas separa más los valores.
+
+Ejecutamos de nuevo el clústering con 3 grupos, además de las pruebas con 4, 5, 6. El resultado puede ser diferente al anterior debido a la selección aleatoria de los centroides inicales. En una aplicación real, deberíamos lanzar varias veces el proceso y quedarnos con la división que haga el mejor ajuste (de forma visual por el momento).
+
+```{r comparing-clustering-k}
+# clustering
+k1 <- kmeans(gvhdDf, centers = 3, algorithm = "Lloyd", iter.max = 100)
+k2 <- kmeans(gvhdDf, centers = 4, algorithm = "Lloyd", iter.max = 100)
+k3 <- kmeans(gvhdDf, centers = 5, algorithm = "Lloyd", iter.max = 100)
+k4 <- kmeans(gvhdDf, centers = 6, algorithm = "Lloyd", iter.max = 100)
+
+# plots
+p1 <- fviz_cluster(k1, data = gvhdDf) + ggtitle("k = 3")
+p2 <- fviz_cluster(k2, data = gvhdDf) + ggtitle("k = 4")
+p3 <- fviz_cluster(k3, data = gvhdDf) + ggtitle("k = 5")
+p4 <- fviz_cluster(k4, data = gvhdDf) + ggtitle("k = 6")
+
+# display
+library(gridExtra)
+grid.arrange(p1, p2, p3, p4, nrow = 2)
+```

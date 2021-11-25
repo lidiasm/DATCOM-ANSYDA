@@ -1,0 +1,124 @@
+---
+title: "Implementación clustering jerárquico con mlr"
+author: "Juan Gómez Romero"
+output:
+    html_document:
+      code_folding: "show"
+      toc: true
+      toc_depth: 2
+      toc_float: true
+      df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(knitr)
+library(tidyverse)
+library(mlr3verse)
+library(mlr3viz)
+```
+
+# Carga de datos
+
+Cargamos el dataset [GvHD](https://rdrr.io/cran/mclust/man/GvHD.html), sección de control, en un [tibble](https://tibble.tidyverse.org) de [tidyverse](https://www.tidyverse.org).
+
+```{r load-data}
+data(GvHD, package = "mclust")
+gvhdTib_raw <- as_tibble(GvHD.control)
+gvhdTib_raw
+```
+
+# Preprocesamiento
+
+Aplicamos preprocesamiento básico:
+
+* Eliminar valores perdidos con na.omit() (no se elimina ninguno)
+* Escalar variables con [scale()](https://www.rdocumentation.org/packages/base/versions/3.6.2/topics/scale)
+
+```{r preprocess-data}
+print(paste0("Filas antes de preprocesamiento: ", nrow(gvhdTib_raw)))
+
+gvhdTib <- gvhdTib_raw %>%
+  na.omit() %>%
+  scale() %>%
+  as_tibble()
+
+head(gvhdTib)
+
+print(paste0("Filas después de preprocesamiento: ", nrow(gvhdTib)))
+```
+
+## Revisión del dataset
+
+```{r peek-data}
+summary(gvhdTib)
+```
+
+# Clústering jerárquico
+
+## _Agglomerative clustering_
+
+### Calcular clústeres
+Calculamos los clústeres con [agnes](https://mlr3cluster.mlr-org.com/reference/mlr_learners_clust.agnes.html) de [mlr3cluster](https://mlr3cluster.mlr-org.com/index.html). mlr actúa aquí como _wrapper_ de la implementación  [cluster::agnes()](https://rdrr.io/cran/cluster/man/agnes.html) y utiliza [stats::cutree()](https://rdrr.io/r/stats/cutree.html) para realizar el corte del dendrograma y obtener _k_ clústeres.
+
+```{r cluster-agnes}
+# task
+my_task <- TaskClust$new(id = "my_first_agnes_cluster", backend = gvhdTib)
+autoplot(my_task)
+
+# learner
+my_learner <- lrn("clust.agnes", k=4, metric = "manhattan", method = "average")
+
+# parámetros disponibles
+print(my_learner$param_set$ids())
+
+# train
+my_learner$train(task = my_task)
+
+# dendograma
+# autoplot(my_learner)
+
+# resultado
+predictions <- my_learner$predict(my_task)
+```
+### Visualización de clústeres
+Visualizamos los clústeres obtenidos con las funciones específicas de visualización del paquete [mlr3viz](https://github.com/mlr-org/mlr3viz).
+
+```{r visualization-agnes-mlr3viz}
+autoplot(predictions, my_task)
+autoplot(predictions, my_task, type = "pca", frame = TRUE)
+```
+
+## _Divisive clustering_
+
+### Calcular clústeres
+Calculamos los clústeres con [diana](https://mlr3cluster.mlr-org.com/reference/mlr_learners_clust.diana.html) de [mlr3cluster](https://mlr3cluster.mlr-org.com/index.html). mlr actúa aquí como _wrapper_ de la implementación  [cluster::diana()](https://rdrr.io/pkg/cluster/man/diana.html) y utiliza [stats::cutree()](https://rdrr.io/r/stats/cutree.html) para realizar el corte del dendrograma y obtener _k_ clústeres.
+
+```{r cluster-diana}
+# task
+my_task <- TaskClust$new(id = "my_first_diana_cluster", backend = gvhdTib)
+autoplot(my_task)
+
+# learner
+my_learner <- lrn("clust.diana", k = 4, metric = "manhattan")
+
+# parámetros disponibles
+print(my_learner$param_set$ids())
+
+# train
+my_learner$train(task = my_task)
+
+# dendograma
+# autoplot(my_learner)
+
+# resultado
+predictions <- my_learner$predict(my_task)
+```
+
+### Visualización de clústeres
+Visualizamos los clústeres obtenidos con las funciones específicas de visualización del paquete [mlr3viz](https://github.com/mlr-org/mlr3viz).
+
+```{r visualization-cluster-diana}
+autoplot(predictions, my_task)
+autoplot(predictions, my_task, type = "pca", frame = TRUE)
+```
