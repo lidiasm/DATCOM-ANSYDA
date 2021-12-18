@@ -1,0 +1,81 @@
+---
+title: "Minería de Datos: Aprendizaje no Supervisado"
+subtitle: "Trabajo de Reglas de Asociación"
+author: "Lidia Sánchez Mérida"
+output: pdf_document
+---
+
+# Introducción al dataset
+
+El dataset que se ha utilizado en este trabajo de Reglas de Asociación es conocido por el nombre de [*Food Preferences*](https://www.kaggle.com/vijayashreer/food-preferences). Se trata de un conjunto de datos que representa una encuesta realizada en 2019 cuyo objetivo consiste en conocer las **preferencias culinarias en diferentes restaurantes**. A partir de esta información se pretende obtener un conjunto de dependencias y asociaciones que permitan descubrir los posibles **factores que influyen al pedir comida en un restaurante**.
+En primer lugar creamos un nuevo objeto en el que almacenar la información para comenzar a analizar sus principales características. Como podemos apreciar en los siguientes resultados, este dataset dispone de un total de **288 registros y 8 variables**, de las cuales todas son nominales a excepción de `Age` que es numérica. Adicionalmente, podemos apreciar que **no existen valores perdidos** por lo que cada registro tiene un valor para cada variable
+
+```{r}
+# Cargamos el dataset del fichero
+food.df <- read.csv("Food_Preference.csv")
+# Dimensiones del dataset
+dim(food.df)
+# Tipos de variables
+str(food.df)
+# Número de datos perdidos
+sum(is.na(food.df))
+```
+A continuación presentamos el resumen estadístico del dataset, en el que podemos visualizar las frecuencias de las categorías y las medidas estadísticas propias de las variables numéricas. En primer lugar destacamos que la **variable `Participant_ID` no parece proporcionar información útil** puesto que se trata de un identificador único para cada participante, por lo que no será considerada en la extracción de reglas. Ocurre una situación similar con la variable `Timestamp` ya que se encuentra muy desagregada. Sin embargo, los **intervalos horarios pueden ser de utilidad** si intentamos codificarlos en función del momento del día en el que se produce la encuesta. 
+
+Por otro lado, si observamos la variable que representa el género de los entrevistados se identifican tres tipos de valores: desconocido, masculino y femenino. La existencia del primer género puede indicar que **existen valores perdidos** codificados de un modo en el que la función **`is.na` no es capaz de identificar**, como es el caso de los espacios en blanco. Por lo tanto, será necesario aplicar un preprocesamiento en esta columna con el objetivo de reemplazar los cuatro valores perdidos. No obstante, al ser una cantidad mínima, podemos determinar que participan un número razonáblemente equitativo de mujeres y hombres, por lo que esta encuesta parece **no estar sesgada por el género**. No ocurre lo mismo con las preferencias alimenticias, las cuales se encuentran a favor de la comida traicional y el zumo fresco. También existe una amplia variedad de nacionalidades asociadas a los entrevistados, además de sus respectivos rangos de edad. Según los cuartiles de la variable `Age` podemos observar que la **mayoría de entrevistados son jóvenes** de hasta 36 años, por lo que esta encuesta puede estar sesgada por la edad de los participantes.
+
+```{r}
+# Resumen estadístico del dataset
+summary(food.df)
+```
+## Objetivos del trabajo
+
+A partir del análisis estadístico mostrado anteriormente, se pretende estudiar las siguientes suposiciones acerca de la relaciones existentes entre los diferentes ítems.
+
+1. ¿Existe algún tipo de patrón alimenticio dependiendo del momento del día? Considerando tanto el tipo de comida, bebida y la inclusión de postre.
+2. ¿Existen preferencias alimenticias en función de la edad, género o nacionalidad? Es decir, ¿existe algún grupo más propenso a pedir un determinado tipo de comida y/o bebida?
+3. ¿Qué relaciones existen entre los diferentes tipos de comidas y bebidas? ¿Cuáles son las combinaciones más y menos comunes en la encuesta?
+4. ¿Influye el tipo de comida y/o bebida elegidos para posteriormente pedir postre? 
+5. ¿Existe una tendencia a pedir postre en función del momento de la comida, el género o la edad?
+
+# Preprocesamiento de datos
+
+En esta sección procedemos a realizar diversas transformaciones para preparar los datos con los que comenzar la extracción de reglas. El objetivo consiste en seleccionar y procesar únicamente aquellas variables que aporten información útil al problema. Para no perder el dataset original se genera un nuevo objeto que almacena el dataset preprocesado.
+
+## Selección de variables
+
+En este primer paso se pretende eliminar aquellas variables que no sean de utilidad para el estudio de dependencias y propiedades de los ítems. Para este dataset, únicamente **eliminamos la variable `Participant_ID`**. 
+
+```{r}
+# Cargamos la librería que permite el uso de pipelines
+library(tidyverse)
+# Nuevo dataset sin la variable `Participant_ID`
+food.prep.df <- food.df %>% select(-Participant_ID)
+```
+
+## Discretización de variables
+
+Existen dos variables que se deben discretizar para ser consideradas en la extracción de reglas. Para `Timestamp` se proponen los siguientes intervalos horarios que se corresponden con los momentos tradicionales del día establecidos:
+
+* 06 AM - 12 PM: *morning*.
+* 13 PM - 18 PM: *afternoon*.
+* 19 PM - 12 AM: *night*.
+* 00 AM - 05 AM: *dawn*.
+
+Mientras que para la variable `Age` se presentan los siguientes rangos de valores y sus correspondientes etiquetas también representando las diferentes categorías a las que puede pertenecer una persona según su edad:
+
+* 8 - 16 años: *infant*.
+* 17 - 30 años: *young*.
+* 31 - 65: *adult*.
+* > 66: *elderly*.
+
+## Normalización de categorías
+
+## Valores perdidos
+
+
+
+```{r}
+distinct(data.frame(food.df$Gender))
+```
+
