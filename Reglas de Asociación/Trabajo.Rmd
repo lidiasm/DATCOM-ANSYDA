@@ -7,8 +7,8 @@ output: pdf_document
 
 # Introducción al dataset
 
-El dataset que se ha utilizado en este trabajo de Reglas de Asociación es conocido por el nombre de [*Food Preferences*](https://www.kaggle.com/vijayashreer/food-preferences). Se trata de un conjunto de datos que representa una encuesta realizada en 2019 cuyo objetivo consiste en conocer las **preferencias culinarias en diferentes restaurantes**. A partir de esta información se pretende obtener un conjunto de dependencias y asociaciones que permitan descubrir los posibles **factores que influyen al pedir comida en un restaurante**.
-En primer lugar creamos un nuevo objeto en el que almacenar la información para comenzar a analizar sus principales características. Como podemos apreciar en los siguientes resultados, este dataset dispone de un total de **288 registros y 8 variables**, de las cuales todas son nominales a excepción de `Age` que es numérica. Adicionalmente, podemos apreciar que **no existen valores perdidos** por lo que cada registro tiene un valor para cada variable
+El dataset que se ha utilizado en este trabajo de Reglas de Asociación es conocido por el nombre de [*Food Preferences*](https://www.kaggle.com/vijayashreer/food-preferences). Se trata de un conjunto de datos que representa una encuesta realizada en 2019 cuyo objetivo consiste en conocer las **preferencias culinarias en diferentes restaurantes**. A partir de esta información se pretende obtener un conjunto de dependencias y asociaciones que permitan descubrir los posibles **factores que influyen al visitar un restaurante**.
+En primer lugar creamos un nuevo objeto en el que almacenar la información para comenzar a analizar sus principales características. Como podemos apreciar en los siguientes resultados, este dataset dispone de un total de **288 registros y 8 variables**, de las cuales todas son nominales a excepción de `Age` que es numérica. Adicionalmente, podemos observar que **no existen valores perdidos** por lo que cada registro tiene un valor para cada variable.
 
 ```{r}
 # Cargamos el dataset del fichero
@@ -20,7 +20,7 @@ str(food.df)
 # Número de datos perdidos
 sum(is.na(food.df))
 ```
-A continuación presentamos el resumen estadístico del dataset, en el que podemos visualizar las frecuencias de las categorías y las medidas estadísticas propias de las variables numéricas. En primer lugar destacamos que la **variable `Participant_ID` no parece proporcionar información útil** puesto que se trata de un identificador único para cada participante, por lo que no será considerada en la extracción de reglas. Ocurre una situación similar con la variable `Timestamp` ya que se encuentra muy desagregada. Sin embargo, los **intervalos horarios pueden ser de utilidad** si intentamos codificarlos en función del momento del día en el que se produce la encuesta. 
+A continuación presentamos el resumen estadístico del dataset, en el que podemos visualizar las frecuencias de las categorías y las medidas estadísticas propias de las variables numéricas. En primer lugar destacamos que la **variable `Participant_ID` no parece proporcionar información útil** puesto que se trata de un identificador único para cada participante, por lo que no será considerada en la extracción de reglas. Ocurre una situación similar con la variable `Timestamp` ya que se encuentra muy desagregada. Sin embargo, los **intervalos horarios pueden ser de utilidad** si intentamos codificarlos en función del momento del día en el que se produce la visita al restaurante. 
 
 Por otro lado, si observamos la variable que representa el género de los entrevistados se identifican tres tipos de valores: desconocido, masculino y femenino. La existencia del primer género puede indicar que **existen valores perdidos** codificados de un modo en el que la función **`is.na` no es capaz de identificar**, como es el caso de los espacios en blanco. Por lo tanto, será necesario aplicar un preprocesamiento en esta columna con el objetivo de reemplazar los cuatro valores perdidos. No obstante, al ser una cantidad mínima, podemos determinar que participan un número razonáblemente equitativo de mujeres y hombres, por lo que esta encuesta parece **no estar sesgada por el género**. No ocurre lo mismo con las preferencias alimenticias, las cuales se encuentran a favor de la comida traicional y el zumo fresco. También existe una amplia variedad de nacionalidades asociadas a los entrevistados, además de sus respectivos rangos de edad. Según los cuartiles de la variable `Age` podemos observar que la **mayoría de entrevistados son jóvenes** de hasta 36 años, por lo que esta encuesta puede estar sesgada por la edad de los participantes.
 
@@ -40,42 +40,65 @@ A partir del análisis estadístico mostrado anteriormente, se pretende estudiar
 
 # Preprocesamiento de datos
 
-En esta sección procedemos a realizar diversas transformaciones para preparar los datos con los que comenzar la extracción de reglas. El objetivo consiste en seleccionar y procesar únicamente aquellas variables que aporten información útil al problema. Para no perder el dataset original se genera un nuevo objeto que almacena el dataset preprocesado.
+En esta sección procedemos a realizar diversas transformaciones para preparar los datos con los que comenzar la extracción de reglas. El objetivo consiste en seleccionar y procesar únicamente aquellas variables que aporten información útil al problema. Para no perder el dataset original se genera un nuevo objeto que almacena el conjunto de datos preprocesado.
 
 ## Selección de variables
 
 En este primer paso se pretende eliminar aquellas variables que no sean de utilidad para el estudio de dependencias y propiedades de los ítems. Para este dataset, únicamente **eliminamos la variable `Participant_ID`**. 
 
-```{r}
+```{r message=FALSE, warning=FALSE}
 # Cargamos la librería que permite el uso de pipelines
 library(tidyverse)
 # Nuevo dataset sin la variable `Participant_ID`
 food.prep.df <- food.df %>% select(-Participant_ID)
+# Variables del nuevo dataset
+colnames(food.prep.df)
 ```
 
 ## Discretización de variables
 
-Existen dos variables que se deben discretizar para ser consideradas en la extracción de reglas. Para `Timestamp` se proponen los siguientes intervalos horarios que se corresponden con los momentos tradicionales del día establecidos:
+Existen dos variables que se deben discretizar para ser consideradas en la extracción de reglas. Para **`Timestamp`** se proponen los siguientes intervalos horarios que se corresponden con los **momentos tradicionales del día** que se conocen actualmente:
 
+* 00 AM - 05 AM: *dawn*.
 * 06 AM - 12 PM: *morning*.
 * 13 PM - 18 PM: *afternoon*.
 * 19 PM - 12 AM: *night*.
-* 00 AM - 05 AM: *dawn*.
 
-Mientras que para la variable `Age` se presentan los siguientes rangos de valores y sus correspondientes etiquetas también representando las diferentes categorías a las que puede pertenecer una persona según su edad:
+```{r}
+# Convertimos la columna en objetos de tiempo considerando el formato AM/PM
+timestamp_objs <- as.POSIXct(food.df$Timestamp, format="%Y/%m/%d %I:%M:%S %p")
+# Extraemos únicamente la hora como números
+timestamp_hours <- as.numeric(format(times, "%H"))
+# Codificamos la variable `Timestamp` según los intervalos anteriores
+timestamp_intervals <- sapply(c(1:length(timestamp_hours)), function(x) 
+    ifelse(timestamp_hours[x] >= 0 & timestamp_hours[x] <= 5, 'dawn', 
+    ifelse(timestamp_hours[x] >= 6 & timestamp_hours[x] <= 12, 'morning',
+    ifelse(timestamp_hours[x] >= 13 & timestamp_hours[x] <= 18, 'afternoon',
+    ifelse(timestamp_hours[x] >= 19, 'night', 'NA')))))
+timestamp_intervals
+```
+Mientras que para la variable **`Age`** se presentan los siguientes rangos de valores y sus correspondientes etiquetas representando los **diferentes grupos sociales** a los que puede pertenecer una persona según su edad:
 
 * 8 - 16 años: *infant*.
 * 17 - 30 años: *young*.
 * 31 - 65: *adult*.
-* > 66: *elderly*.
+* \> 66: *elderly*.
 
+```{r}
+# Codificamos la variable `Age` según los intervalos anteriores
+age_intervals <- sapply(c(1:nrow(food.df)), function(x) 
+    ifelse(food.df$Age[x] >= 8 & food.df$Age[x] <= 16, 'infant', 
+    ifelse(food.df$Age[x] >= 17 & food.df$Age[x] <= 30, 'young', 
+    ifelse(food.df$Age[x] >= 31 & food.df$Age[x] <= 65, 'adult', 
+    ifelse(food.df$Age[x] >= 66, 'elderly', 'NA')))))
+age_intervals
+```
 ## Normalización de categorías
 
 ## Valores perdidos
 
-
-
 ```{r}
 distinct(data.frame(food.df$Gender))
+df[df==""]<-NA
 ```
 
