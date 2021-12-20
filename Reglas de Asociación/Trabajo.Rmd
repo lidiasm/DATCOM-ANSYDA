@@ -3,6 +3,7 @@ title: "Minería de Datos: Aprendizaje no Supervisado"
 subtitle: "Trabajo de Reglas de Asociación"
 author: "Lidia Sánchez Mérida"
 output: pdf_document
+urlcolor: blue
 ---
 
 # Introducción al dataset
@@ -48,6 +49,7 @@ En este primer paso se pretende eliminar aquellas variables que no sean de utili
 
 ```{r message=FALSE, warning=FALSE}
 # Cargamos la librería que permite el uso de pipelines
+require(tidyverse)
 library(tidyverse)
 # Nuevo dataset sin la variable `Participant_ID`
 food.prep.df <- food.df %>% select(-Participant_ID)
@@ -68,13 +70,12 @@ Existen dos variables que se deben discretizar para ser consideradas en la extra
 # Convertimos la columna en objetos de tiempo considerando el formato AM/PM
 timestamp_objs <- as.POSIXct(food.df$Timestamp, format="%Y/%m/%d %I:%M:%S %p")
 # Extraemos únicamente la hora como números
-timestamp_hours <- as.numeric(format(times, "%H"))
+timestamp_hours <- as.numeric(format(timestamp_objs, "%H"))
 # Codificamos la variable `Timestamp` según los intervalos anteriores
-timestamp_intervals <- sapply(c(1:length(timestamp_hours)), function(x) 
-    ifelse(timestamp_hours[x] >= 0 & timestamp_hours[x] <= 5, 'dawn', 
-    ifelse(timestamp_hours[x] >= 6 & timestamp_hours[x] <= 12, 'morning',
-    ifelse(timestamp_hours[x] >= 13 & timestamp_hours[x] <= 18, 'afternoon',
-    ifelse(timestamp_hours[x] >= 19, 'night', 'NA')))))
+timestamp_intervals <- ifelse(timestamp_hours >= 0 & timestamp_hours <= 5, 'Dawn', 
+    ifelse(timestamp_hours >= 6 & timestamp_hours <= 12, 'Morning',
+    ifelse(timestamp_hours >= 13 & timestamp_hours <= 18, 'Afternoon',
+    ifelse(timestamp_hours >= 19, 'Night', 'LABEL NOT FOUND'))))
 timestamp_intervals
 ```
 Mientras que para la variable **`Age`** se presentan los siguientes rangos de valores y sus correspondientes etiquetas representando los **diferentes grupos sociales** a los que puede pertenecer una persona según su edad:
@@ -86,15 +87,62 @@ Mientras que para la variable **`Age`** se presentan los siguientes rangos de va
 
 ```{r}
 # Codificamos la variable `Age` según los intervalos anteriores
-age_intervals <- sapply(c(1:nrow(food.df)), function(x) 
-    ifelse(food.df$Age[x] >= 8 & food.df$Age[x] <= 16, 'infant', 
-    ifelse(food.df$Age[x] >= 17 & food.df$Age[x] <= 30, 'young', 
-    ifelse(food.df$Age[x] >= 31 & food.df$Age[x] <= 65, 'adult', 
-    ifelse(food.df$Age[x] >= 66, 'elderly', 'NA')))))
+age_intervals <- ifelse(food.df$Age >= 8 & food.df$Age <= 16, 'Infant', 
+    ifelse(food.df$Age >= 17 & food.df$Age <= 30, 'Young', 
+    ifelse(food.df$Age >= 31 & food.df$Age <= 65, 'Adult', 
+    ifelse(food.df$Age >= 66, 'Elderly', 'LABEL NOT FOUND'))))
 age_intervals
 ```
 ## Normalización de categorías
 
+Tal y como hemos podido observar en el resumen estadístico anterior, la variable `Nationality` dispone de una gran cantidad de valores. Visualizando sus categorías me he podido percatar de que existen algunas **nacionalidades codificadas de diversas formas** y, por tanto, son identificadas erróneamente como diferentes. A continuación se muestra un listado de los valores nominales de esta variable. Un caso representativo de este inconveniente es el relativo al país Malasia, que es codificado como *Malaysian*, *Malaysia *, *Malaysia*, *MALAYSIAN* o *MY*. Como consecuencia, es necesario aplicar un preprocesamiento manual para normalizar la codificación de cada nacionalidad disponible. Para ello vamos a utilizar el estándar [ISO 3166 Alpha-2](https://www.iso.org/iso-3166-country-codes.html) que etiqueta a cada país por una abreviatura compuesta de dos letras. Así aplicaremos el siguiente etiquetado:
+
+* Algerian: *DZ*.
+* Canada: *CA*.
+* China: *CN*
+* Indian: *IN*.
+* Indonesia, Indonesain, Indonosian, Indonesian : *ID*.
+* Japan: *JP*.
+* Korean: *KR*.
+* Malaysia, Malaysia , Malaysian, MALAYSIAN, MY: *MY*.
+* Maldivian, Maldivian : *MV*.
+* Mauritian: *MR*.
+* Muslim: *MA*.
+* Nigerian: *NG*.
+* Pakistan, Pakistani, Pakistani : *PK*. 
+* Seychellois: *SC*.
+* Tanzanian: *TZ*.
+* Yemen: *YE*.
+
+```{r}
+# Cargamos la librería que nos permite operar con strings
+require(stringi)
+library(stringi)
+# Lista de nacionalidades únicas ordenadas alfabéticamente
+nationalities <- str_sort(stri_unique(food.df$Nationality))
+nationalities
+# Codificamos la variable `Nationality` con las etiquetas anteriores
+encoded_nats <- ifelse(grepl('Algerian', food.df$Nationality), 'DZ', 
+                ifelse(grepl('Canad', food.df$Nationality), 'CA',
+                ifelse(grepl('China', food.df$Nationality), 'CN',
+                ifelse(grepl('India', food.df$Nationality), 'IN', 
+                ifelse(grepl('Indones', food.df$Nationality), 'ID',
+                ifelse(grepl('Japan', food.df$Nationality), 'JP',
+                ifelse(grepl('Korean', food.df$Nationality), 'KR',
+                ifelse(grepl('Malay', food.df$Nationality), 'MY',
+                ifelse(grepl('MY', food.df$Nationality), 'MY',
+                ifelse(grepl('MALAYSIAN', food.df$Nationality), 'MY',
+                ifelse(grepl('Maldivian', food.df$Nationality), 'MV',
+                ifelse(grepl('Mauritian', food.df$Nationality), 'MR',
+                ifelse(grepl('Muslim', food.df$Nationality), 'MA',
+                ifelse(grepl('Nigerian', food.df$Nationality), 'NG',
+                ifelse(grepl('Pakistan', food.df$Nationality), 'PK',
+                ifelse(grepl('Seychellois', food.df$Nationality), 'SC',
+                ifelse(grepl('Tanzanian', food.df$Nationality), 'TZ',
+                ifelse(grepl('Yemen', food.df$Nationality), 'YE', 
+                'LABEL NOT FOUND'))))))))))))))))))
+encoded_nats
+```
 ## Valores perdidos
 
 ```{r}
