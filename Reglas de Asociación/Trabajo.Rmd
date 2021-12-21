@@ -72,12 +72,16 @@ timestamp_objs <- as.POSIXct(food.df$Timestamp, format="%Y/%m/%d %I:%M:%S %p")
 # Extraemos únicamente la hora como números
 timestamp_hours <- as.numeric(format(timestamp_objs, "%H"))
 # Codificamos la variable `Timestamp` según los intervalos anteriores
-timestamp_intervals <- ifelse(timestamp_hours >= 0 & timestamp_hours <= 5, 'Dawn', 
+timestamp_intervals <- ifelse(timestamp_hours >=0 & timestamp_hours <= 5, 'Dawn', 
     ifelse(timestamp_hours >= 6 & timestamp_hours <= 12, 'Morning',
     ifelse(timestamp_hours >= 13 & timestamp_hours <= 18, 'Afternoon',
     ifelse(timestamp_hours >= 19, 'Night', 'LABEL NOT FOUND'))))
 timestamp_intervals
+# Reemplazamos los valores de la variable `Timestamp` por los codificados
+# como factores
+food.prep.df$Timestamp <- as.factor(timestamp_intervals)
 ```
+
 Mientras que para la variable **`Age`** se presentan los siguientes rangos de valores y sus correspondientes etiquetas representando los **diferentes grupos sociales** a los que puede pertenecer una persona según su edad:
 
 * 8 - 16 años: *infant*.
@@ -92,7 +96,11 @@ age_intervals <- ifelse(food.df$Age >= 8 & food.df$Age <= 16, 'Infant',
     ifelse(food.df$Age >= 31 & food.df$Age <= 65, 'Adult', 
     ifelse(food.df$Age >= 66, 'Elderly', 'LABEL NOT FOUND'))))
 age_intervals
+# Reemplazamos los valores de la variable `Age` por los codificados 
+# como factores
+food.prep.df$Age <- as.factor(age_intervals)
 ```
+
 ## Normalización de categorías
 
 Tal y como hemos podido observar en el resumen estadístico anterior, la variable `Nationality` dispone de una gran cantidad de valores. Visualizando sus categorías me he podido percatar de que existen algunas **nacionalidades codificadas de diversas formas** y, por tanto, son identificadas erróneamente como diferentes. A continuación se muestra un listado de los valores nominales de esta variable. Un caso representativo de este inconveniente es el relativo al país Malasia, que es codificado como *Malaysian*, *Malaysia *, *Malaysia*, *MALAYSIAN* o *MY*. Como consecuencia, es necesario aplicar un preprocesamiento manual para normalizar la codificación de cada nacionalidad disponible. Para ello vamos a utilizar el estándar [ISO 3166 Alpha-2](https://www.iso.org/iso-3166-country-codes.html) que etiqueta a cada país por una abreviatura compuesta de dos letras. Así aplicaremos el siguiente etiquetado:
@@ -142,11 +150,90 @@ encoded_nats <- ifelse(grepl('Algerian', food.df$Nationality), 'DZ',
                 ifelse(grepl('Yemen', food.df$Nationality), 'YE', 
                 'LABEL NOT FOUND'))))))))))))))))))
 encoded_nats
+# Reemplazamos los valores de la variable `Nationality` por los codificados
+# como factores
+food.prep.df$Nationality <- as.factor(encoded_nats)
 ```
+
 ## Valores perdidos
 
+Finalmente en esta sección de preprocesamiento se procede a tratar los valores perdidos codificados como espacios en blanco que han sido encontrados en la columna `Gender` durante el análisis del dataset. En primer lugar vamos a **convertirlos a valores nulos** simbolizándolos con la denominación característica `NA`. Una vez hemos identificado los cuatro entrevistados de los que no se conoce su género, los mostramos por pantalla para conocer el resto de atributos. Como podemos apreciar se trata de cuatro personas jóvenes de nacionalidades india y árabe cuyas visitas se han producido por la tarde y de madrugada. Al ser un número mínimo de registros con valores nulos y para no introducir datos sintéticos, vamos a **eliminar estas encuestas con valores perdidos** antes de comenzar la extracción de reglas.
+
 ```{r}
-distinct(data.frame(food.df$Gender))
-df[df==""]<-NA
+# Codificamos las celdas vacías como valores nulos 
+food.prep.df$Gender[food.prep.df$Gender == ""] <- NA
+# Suma de valores perdidos en la columna `Gender`
+sum(is.na(food.prep.df$Gender))
+# Registros con valores perdidos en la columna `Gender`
+food.prep.df[rowSums(is.na(food.prep.df)) > 0,]
+# Eliminamos los registros con valores perdidos en la columna `Gender`
+food.prep.df <- drop_na(food.prep.df)
+dim(food.prep.df)
+```
+
+# Extracción de Reglas de Asociación
+
+Tras preprocesar el dataset *Food Preferences* a continuación se prepara el conjunto de datos convirtiéndolo en un conjunto de transacciones previo a la aplicación de los algoritmos. Al disponer de una **estructura de datos tabular** su correspondiente interpretación determina que los ítems serán representados por parejas (columna, valor), mientras que las transacciones son los registros asociados a cada una de las encuestas realizadas. Como podemos visualizar en el resumen de la base de datos transaccional, existen un total de **284 transacciones y 34 ítems**, de entre los cuales también se presenta una lista con los **ítems más frecuentes**. Estos se corresponden con las categorías predominantes para cada una de las siete variables incluidas en el dataset, de modo que podemos obtener las siguientes conclusiones:
+
+1. Existe una considerable cantidad de encuestados que han acudido a restaurantes en el **intervalo de tarde**, tomando **zumo fresco** como principal bebida, mientras que el tipo de **comida más frecuente es la tradicional**.
+
+2. La mayoría de los entrevistados son de **nacionalidad india y género femenino**.
+
+Adicionalmente podemos observar que **todas las transacciones disponen de 7 ítems**, lo que puede indicar que se han utilizado todas las variables consideradas en los ítemsets generados.
+
+```{r}
+# Cargamos las librerías que permiten trabajar con RAs
+library(arules)
+library(arulesViz)
+# Convertimos el dataset a un conjunto de transacciones
+food.prep.trs <- as(food.prep.df, "transactions")
+summary(food.prep.trs)
+```
+## Items frecuentes
+
+En el siguiente gráfico se representan los 20 **ítems más frecuentes** ordenados de mayor a menor. Como era de esperar, los cinco primeros se corresponden con los anteriores visualizados en el resumen de las transacciones, mientras que el sexto hace referencia al intervalo de edad predominante. De los restantes podemos observar los siguientes aspectos:
+
+1. Existe una mayor representación de **encuestados indecisos al pedir postre** puesto que la frecuencia de este ítem es superior a las otras dos opciones. Parece lógico pensar que solicitar un tercer plato no suele decidirse de antemano y que depende de diversos factores, como qué platos principales se solicitan.
+
+2. Tras la mayoría de jóvenes se encuentran el resto de entrevistados en el intervalo de **adultos**, siendo prácticamente mínimo los encuestados que pertenecen al rango de edad menor e inexistente al asociado con los más mayores.
+
+3. El momento del día en el que existe una mayor afluencia de entrevistados es el **intervalo de tarde** de 13 PM a 18 PM. **Su frecuencia es considerablemente alta** con respecto a los restantes rangos, los cuales son más cercanos entre sí, por lo que existe prácticamente el mismo número de encuestados que han visitado restaurantes por la mañana, de noche y de madrugada. Este hecho nos indica que existe en las encuestas realizadas existe una clara preferencia por visitar restaurantes a la hora del medio día o tarde.
+
+4. Finalmente podemos apreciar que entre los 20 ítems más frecuentes **apenas aparecen algunas nacionalidades** de las que se encuentran disponibles en el dataset. Como se ha acentuado anteriormente, la mayoría de los encuestados son de nacionalidad india, mientras que al final del gráfico podemos apreciar que algunos ítems involucran a entrevistados procedentes de Malasia, Indonesia y Pakistán.
+
+```{r}
+# Representación de los 20 ítems más frecuentes
+itemFrequencyPlot(food.prep.trs, topN=20, cex.names=0.8)
+```
+
+## Itemsets frecuentes, maximales y cerrados
+
+Una vez conocemos las parejas (atributo, valor) más comunes de la base de datos transaccional, continuamos con la extracción de los **itemsets frecuentes**. Para ello utilizaremos el algoritmo `apriori` con un **soporte mínimo de 0.1** con el objetivo de obtener aquellos que cubren una **mayor y menor proporción de los datos**. Como resultado obtenemos un total de 305 itemsets frecuentes de diferentes longitudes. Si ordenamos los resultados en orden decreciente obtenemos prácticamente la **misma información anterior** al combinar los ítems más frecuentes.
+
+```{r}
+# Obtenemos los ítemsets frecuentes
+food.prep.frec <- apriori(food.prep.trs, parameter=list(support=0.1, target="frequent"))
+# Ordenamos los ítemsets frecuentes por sus soportes en orden decreciente
+inspect(head(sort(food.prep.frec, by="support")))
+```
+
+En el siguiente gráfico que representa la frecuencia de itemsets frecuentes con respecto a sus longitudes, podemos apreciar que la mayoría dispone de entre 3 y 4 ítems, siendo prácticamente mínimos aquellos con una longitud mínima y máxima. Esto nos puede indicar que la mayoría de itemsets **solo incluyen la mitad de las variables** disponibles, aproximadamente, para cubrir los diferentes casos que existen en este dataset.
+
+```{r}
+barplot(table(size(food.prep.frec)), xlab="Longitud de los itemsets", ylab="Número de itemsets")
+```
+
+Para intentar reducir el número de itemsets frecuentes (305) procedemos a imponer una restricción adicional para obtener únicamente aquellos cuyos superconjuntos inmediatos son frecuentes: los **itemsets maximales**.
+
+* Bajo soporte, muy bajo comparado con los anteriores.
+* Mayor cantidad de ítems, implican más variables y más valores.
+
+```{r}
+# Obtenemos los itemsets maximales
+food.prep.max <- food.prep.frec[is.maximal(food.prep.frec)]
+# Número de itemsets frecuentes
+length(food.prep.max)
+# Ordenamos los ítemsets maximales por sus soportes en orden decreciente
+inspect(head(sort(food.prep.max, by="support")))
 ```
 
