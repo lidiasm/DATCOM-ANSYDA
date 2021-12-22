@@ -220,13 +220,30 @@ inspect(head(sort(food.prep.frec, by="support")))
 En el siguiente gráfico que representa la frecuencia de itemsets frecuentes con respecto a sus longitudes, podemos apreciar que la mayoría dispone de entre 3 y 4 ítems, siendo prácticamente mínimos aquellos con una longitud mínima y máxima. Esto nos puede indicar que la mayoría de itemsets **solo incluyen la mitad de las variables** disponibles, aproximadamente, para cubrir los diferentes casos que existen en este dataset.
 
 ```{r}
-barplot(table(size(food.prep.frec)), xlab="Longitud de los itemsets", ylab="Número de itemsets")
+# Gráfico que representa la frecuencia de las diferentes longitudes de los
+# itemsets frecuentes
+barplot(table(size(food.prep.frec)), main="Itemsets frecuentes", col="lightgreen",
+        xlab="Longitud de los itemsets", ylab="Número de itemsets")
 ```
+Para intentar reducir el número de itemsets frecuentes (305) procedemos a imponer una restricción adicional para obtener únicamente aquellos cuyos superconjuntos inmediatos son frecuentes: los **itemsets cerrados**. Como podemos apreciar, hemos conseguido un número menor de itemsets que en el caso anterior aunque siguen siendo demasiados. De hecho, si los ordenamos por su soporte en orden decreciente, podemos observar que los seis primeros **son los mismos itemsets frecuentes mostrados anteriormente**.
 
-Para intentar reducir el número de itemsets frecuentes (305) procedemos a imponer una restricción adicional para obtener únicamente aquellos cuyos superconjuntos inmediatos son frecuentes: los **itemsets maximales**.
+```{r}
+# Obtenemos los itemsets cerrados
+food.prep.closed <- food.prep.frec[is.closed(food.prep.frec)]
+# Número de itemsets frecuentes
+length(food.prep.closed)
+# Ordenamos los ítemsets cerrados por sus soportes en orden decreciente
+inspect(head(sort(food.prep.closed, by="support")))
+```
+Es tan mínima la diferencia entre los itemsets frecuentes y cerrados que se han obtenido de este dataset, que en el siguiente gráfico donde se representan las frecuencias de sus longitudes es prácticamente idéntico al anterior. Por lo tanto, entre la composición de los **itemsets frecuentes y cerrados apenas se pueden apreciar diferencias** para este dataset.
 
-* Bajo soporte, muy bajo comparado con los anteriores.
-* Mayor cantidad de ítems, implican más variables y más valores.
+```{r}
+# Gráfico que representa la frecuencia de las diferentes longitudes de los
+# itemsets cerrados
+barplot(table(size(food.prep.closed)), main="Itemsets cerrados", col="lightblue",
+        xlab="Longitud de los itemsets", ylab="Número de itemsets")
+```
+Continuamos reduciendo el número de itemsets calculando a continuación el último conjunto más restrictivo: los **itemsets maximales**. A diferencia de los dos casos anteriores, el número de itemsets generado es prácticamente cuatro veces menor. Adicionalmente podemos apreciar que existen dos aspectos destacables de este nuevo conjunto. Por un lado **sus soportes son mínimos**, por lo que la cobertura que realizan de los datos es particularmente escasa. Mientras que, además, la **longitud de los ítems maximales es superior** a los cerrados y frecuentes, por lo que relacionan una mayor cantidad de atributos y valores. Si observamos su composición podemos apreciar que en la mayoría aparecen características tales como el momento del día, la nacionalidad, el género y el tipo de menú solicitado.
 
 ```{r}
 # Obtenemos los itemsets maximales
@@ -235,5 +252,72 @@ food.prep.max <- food.prep.frec[is.maximal(food.prep.frec)]
 length(food.prep.max)
 # Ordenamos los ítemsets maximales por sus soportes en orden decreciente
 inspect(head(sort(food.prep.max, by="support")))
+```
+En el siguiente diagrama de barras podemos apreciar un **aumento de la longitud de los itemsets maximales**, como hemos apuntado anteriormente, siendo los más predominantes aquellos compuestos por entre 4 y 5 variables. Esto nos puede indicar que la reducción de la cantidad de itemsets tiene como consecuencia el **aumento del número de variables que intervienen** en la explicación de las diferentes combinaciones que pueden surgir dentro del dataset.
+
+```{r}
+# Gráfico que representa la frecuencia de las diferentes longitudes de los
+# itemsets maximales
+barplot(table(size(food.prep.max)), main="Itemsets maximales", col="salmon",
+        xlab="Longitud de los itemsets", ylab="Número de itemsets")
+```
+
+Para concluir este subapartado a continuación se representa el resumen del número de itemsets frecuentes, cerrados y maximales que se han obtenido para este problema particular. Tal y como hemos comentado anteriormente, el número de itemsets frecuentes y cerrados es muy similar, siendo además muy parecidas las combinaciones de ítems de las que se componen. Ambos se distinguen considerablemente del último grupo de itemsets maximales, cuyo número es más reducido a costa de aumentar la longitud y complejidad. Finalmente, podemos concluir que probablmente como consecuencia de la combinación de un mayor número de variables, sus correspondientes soportes son considerablemente menores puesto que representan situaciones menos frecuentes. 
+
+```{r}
+# Gráfico que representa el resumen del número de itemsets generados
+barplot(c(Frecuentes=length(food.prep.frec), Cerrados=length(food.prep.closed), 
+        Maximales=length(food.prep.max)), main="Resumen de itemsets generados",
+        ylab="Frecuencia", xlab="Itemsets",
+        col=c("lightgreen", "lightblue", "salmon"))
+```
+
+## Algoritmo Apriori
+
+El primer algoritmo que procedemos a aplicar es **Apriori** para la extracción de reglas con un **soporte mínimo de 0.1 y una confianza mínima de 0.8**. Adicionalmente imponemos la restricción de que cada regla disponga al menos de componentes, el antecedente y el consecuente. Como podemos observar en el resumen mostrado a continuación, esta técnica ha logrado generar un total de **338 reglas con longitudes de entre 2 y 6 ítems**, aunque la mayoría de ellas contienen 4 ítems concretamente. En relación a las medidas de calidad que se calculan por defecto, podemos observar que la **mayoría de reglas disponen de un soporte mínimo**, puesto que apenas existe diferencia entre el Q1 y Q3. Este hecho nos indica que existe una concentración de reglas que **representan dependencias y relaciones entre ítems poco frecuentes**, lo cual puede ser interesante para un estudio posterior. Por otro lado podemos observar que el primer y tercer cuartil de la medida de interés o *lift* son mayores que uno, lo que puede reflejar la existencia de **dependencias positivas** entre los diferentes ítems.
+
+```{r}
+# Extracción de reglas con el algoritmo Apriori con soporte mínimo de 0.1, 
+# confianza mínima de 0.8 y longitud mínima de 2.
+food.apriori.rules <- apriori(food.prep.trs, 
+                        parameter=list(support=0.1, confidence=0.8, minlen=2))
+# Resumen de las reglas obtenidas
+summary(food.apriori.rules)
+```
+Si ordenamos las reglas según la confianza y podamos las que sean redundantes en base a esta medida de calidad, podemos apreciar que **el conjunto de reglas se reduce drásticamente** hasta únicamente disponer de 90. De este modo hemos eliminado todas aquellas que aportan prácticamente la misma información a la representación de dependencias y asociaciones entre los ítems. Como consecuencia también se puede observar un mayor **equilibrio entre el número de reglas que pertenencen a las diferentes longitudes**. A diferencia del caso anterior, en este conjunto de reglas podadas no existe una única longitud predominante, si no que la mayoría dispone de entre 2 y 4 ítems.
+
+```{r}
+# Ordenamos las reglas extraídas según la confianza
+food.apriori.sorted.rules <- sort(food.apriori.rules, by="confidence")
+# Obtenemos las reglas redundantes según la confianza
+food.apriori.redundant <- is.redundant(x=food.apriori.sorted.rules, 
+                                       measure = "confidence")
+# Podamos las reglas redundantes
+food.apriori.pruned.rules <- food.apriori.sorted.rules[!food.apriori.redundant] 
+# Resumen de las reglas restantes
+summary(food.apriori.pruned.rules)
+```
+En el siguiente gráfico representamos este nuevo conjunto de reglas reducido en el que podemos apreciar que existen unas siete reglas situadas en la esquina inferior izquierda con un **alto valor de *lift*, una confianza alrededor del 80-85% aunque con un bajo soporte**. Este grupo de asociaciones pueden representar situaciones que suelen ocurrir con una razonable seguridad pero con una baja frecuencia. Por lo tanto, se trata de dependencias fuertes y extrañas que pueden proporcionar información muy útil con el objetivo de estudiar las preferencias del público en los restaurantes.
+
+```{r}
+# Representamos gráficamente las reglas podadas visualizando sus soportes,
+# confianzas y lift
+plot(food.apriori.pruned.rules, jitter=0)
+```
+A continuación obtenemos este conjunto de siete reglas particular para su estudio en profundidad. Como podemos apreciar, existen reglas de las tres longitudes mayoritarias que anteriormente se han observado con 1, 2 y 3 componentes. Las conclusiones que se pueden extraer de esete subconjunto se detallan a continuación:
+
+1. La hipótesis de la primera regla consiste en afirmar que si la persona que visita un restaurante se encuentra en el intervalo de edad adulto, es decir entre 31 y 65 años, y no conoce a priori se pedirá postre existe un 83% de confianza de que se trate de una mujer. En mi opinión, al tratarse de un **valor tan ambiguo no creo que podamos considerar esta regla como interesante** puesto que uno de los antecedentes no nos indica si la persona en cuestión tomará o no postre. Una situación similar ocurre con la segunda regla al incluir el valor `maybe` en el antecedente. Además su consecuente indica que si se cumplen las condiciones del antecedente, es probable que se trate de una **persona joven**. Considerando la **representación mayoritaria** de este grupo, tampoco me parece una regla relevante.
+
+2. Reglas 3, 4, 6 y7 aportan la misma información pero sí indican un patrón de persona y comida.
+3. Regla 5 indica un patrón de comidas por momento del día.
+
+```{r}
+# Subconjunto de reglas con lift>1.2, soporte<0.3 y confianza<0.85
+food.apriori.pruned.rules.subset <- subset(food.apriori.pruned.rules, 
+                     subset=lift > 1.2 & support < 0.3 & confidence < 0.85)
+# Longitud del subconjunto
+length(food.apriori.pruned.rules.subset)
+# Mostramos las reglas obtenidas
+inspect(head(food.apriori.pruned.rules.subset, 7))
 ```
 
