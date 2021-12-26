@@ -72,7 +72,8 @@ timestamp_objs <- as.POSIXct(food.df$Timestamp, format="%Y/%m/%d %I:%M:%S %p")
 # Extraemos únicamente la hora como números
 timestamp_hours <- as.numeric(format(timestamp_objs, "%H"))
 # Codificamos la variable `Timestamp` según los intervalos anteriores
-timestamp_intervals <- ifelse(timestamp_hours >=0 & timestamp_hours <= 5, 'Dawn', 
+timestamp_intervals <- 
+    ifelse(timestamp_hours >=0 & timestamp_hours <= 5, 'Dawn', 
     ifelse(timestamp_hours >= 6 & timestamp_hours <= 12, 'Morning',
     ifelse(timestamp_hours >= 13 & timestamp_hours <= 18, 'Afternoon',
     ifelse(timestamp_hours >= 19, 'Night', 'LABEL NOT FOUND'))))
@@ -91,7 +92,8 @@ Mientras que para la variable **`Age`** se presentan los siguientes rangos de va
 
 ```{r}
 # Codificamos la variable `Age` según los intervalos anteriores
-age_intervals <- ifelse(food.df$Age >= 8 & food.df$Age <= 16, 'Infant', 
+age_intervals <- 
+    ifelse(food.df$Age >= 8 & food.df$Age <= 16, 'Infant', 
     ifelse(food.df$Age >= 17 & food.df$Age <= 30, 'Young', 
     ifelse(food.df$Age >= 31 & food.df$Age <= 65, 'Adult', 
     ifelse(food.df$Age >= 66, 'Elderly', 'LABEL NOT FOUND'))))
@@ -212,7 +214,8 @@ Una vez conocemos las parejas (atributo, valor) más comunes de la base de datos
 
 ```{r}
 # Obtenemos los ítemsets frecuentes
-food.prep.frec <- apriori(food.prep.trs, parameter=list(support=0.1, target="frequent"))
+food.prep.frec <- apriori(food.prep.trs, 
+                          parameter=list(support=0.1, target="frequent"))
 # Ordenamos los ítemsets frecuentes por sus soportes en orden decreciente
 inspect(head(sort(food.prep.frec, by="support")))
 ```
@@ -284,125 +287,188 @@ food.apriori.rules <- apriori(food.prep.trs,
 # Resumen de las reglas obtenidas
 summary(food.apriori.rules)
 ```
-Si ordenamos las reglas según la confianza y podamos las que son redundantes en base a esta medida de calidad, podemos apreciar que **el conjunto de reglas se reduce drásticamente** hasta únicamente disponer de 90. De este modo hemos eliminado todas aquellas que aportan prácticamente la misma información a la representación de dependencias y asociaciones entre los ítems. Como consecuencia también se puede observar un mayor **equilibrio entre el número de reglas que pertenencen a las diferentes longitudes**. A diferencia del caso anterior, en este conjunto de reglas podadas no existe una única longitud predominante, si no que la mayoría dispone de entre 2 y 4 ítems.
+
+A continuación procedemos a aplicar un preprocesamiento de modo que se eliminen tanto las **reglas iguales como las redundantes**. En el primer caso se trata de reglas cuyos antecedentes son iguales o subconjuntos de los antecedentes de otras reglas, mientras que en la segunda situación son reglas cuyos antecedentes y consecuentes son iguales aunque intercambiados de posición. Tras aplicar sendos filtros, podemos observar que **el conjunto de reglas se reduce drásticamente** hasta únicamente disponer de 66. Como consecuencia podemos apreciar el aumento del número de reglas con una menor longitud, mientras que el **número de reglas de mayor tamaño ha disminuido considerablemente**. Si observamos el resumen estadístico que se muestra a continuación, podemos apreciar que los niveles de **soporte y confianza no han varíado** prácticamente nada, mientras que la métrica de calidad *lift* ha aumentado ligeramente sus valores tanto en el mínimo como en los cuartiles. Esto nos puede indicar que este nuevo conjunto de reglas más reducido dispone de la misma cobertura y confianza que el conjunto original por lo que el preprocesamiento efectuado parece no haber afectado a su calidad.
 
 ```{r}
-# Ordenamos las reglas extraídas según la confianza
-food.apriori.sorted.rules <- sort(food.apriori.rules, by="confidence")
-# Obtenemos las reglas redundantes según la confianza
-food.apriori.redundant <- is.redundant(x=food.apriori.sorted.rules, 
-                                       measure = "confidence")
-# Podamos las reglas redundantes
-food.apriori.pruned.rules <- food.apriori.sorted.rules[!food.apriori.redundant] 
-# Resumen de las reglas restantes
-summary(food.apriori.pruned.rules)
+# Ordenamos las reglas según la confianza
+food.apriori.rules <- sort(food.apriori.rules, by="confidence")
+# Obtenemos los itemsets que han generado las reglas
+food.apriori.itemsets <- generatingItemsets(food.apriori.rules)
+food.apriori.equal.rules <- which(duplicated(food.apriori.itemsets))
+# Descartamos aquellas reglas que sean iguales 
+# o muy similares en el antecedente
+food.apriori.rules <- food.apriori.rules[-food.apriori.equal.rules]
+# Obtenemos las reglas reglas que son redundantes
+food.apriori.redundant <- is.redundant(x=food.apriori.rules, measure = "confidence")
+# Descartamos las reglas redundantes
+food.apriori.rules <- food.apriori.rules[!food.apriori.redundant] 
+# Resumen de las reglas finales
+summary(food.apriori.rules)
 ```
-En el siguiente gráfico representamos este nuevo conjunto de reglas reducido en el que podemos apreciar que existen unas siete reglas situadas en la esquina inferior izquierda con un **alto valor de *lift*, una confianza alrededor del 80-85% aunque con un bajo soporte**. Este grupo de asociaciones pueden representar situaciones que suelen ocurrir con una razonable seguridad pero con una baja frecuencia. Por lo tanto, se trata de dependencias fuertes y extrañas que pueden proporcionar información muy útil con el objetivo de estudiar las preferencias del público en los restaurantes.
+En el siguiente gráfico representamos este nuevo conjunto de reglas reducido, en el que podemos apreciar que existen dos reglas situadas en la esquina inferior izquierda con un **alto valor de *lift*, una confianza alrededor del 80-85% aunque con un bajo soporte**. Este grupo de asociaciones pueden representar situaciones que suelen ocurrir con una razonable seguridad pero con una baja frecuencia. Por lo tanto, se trata de dependencias fuertes y extrañas que pueden proporcionar información muy útil con la que analizar las preferencias culinarias del público en los restaurantes.
 
 ```{r}
 # Representamos gráficamente las reglas podadas visualizando sus soportes,
 # confianzas y lift
-plot(food.apriori.pruned.rules, jitter=0)
+plot(food.apriori.rules, jitter=0)
 ```
-A continuación obtenemos este conjunto de siete reglas particular para su estudio en profundidad. Como podemos apreciar, existen reglas de las tres longitudes mayoritarias que anteriormente se han observado con 1, 2 y 3 componentes. Las conclusiones que se pueden extraer de esete subconjunto se detallan a continuación:
-
-1. Las **reglas número 1, 6 y 7 podrían ser prescindibles** puesto que la tercera contiene prácticamente toda la información que proporcionan, es decir, dispone de la mayoría de ítems en el antecedente y el mismo consecuente. Esta regla puede identificar un posible patrón en el que si una **persona adulta** visita un restaurante y solicita **comida tradicional con zumo fresco es probable que se trate de una mujer**. De este modo hemos conseguido uno de los objetivos de este proyecto consistente en identificar preferencias alimenticias según el género.
-
-2. La hipótesis de la segunda regla consiste en identificar una persona joven si es un hombre que pide comida tradicional y quizás se plantee el postre. Si agrupamos esta regla con la tercera analizada anteriormente, puede aumentar su valor puesto que nos indica que existe un **mismo patrón alimenticio para dos géneros e intervalos de edad diferentes**. Este hecho nos indica que puede existir una preferencia generalizada por este tipo de menú.
-
-3. Finalmente la quinta regla afirma que, independientemente de las características de la persona, si se pide un plato de comida oriental es un 80% probable de que se trate de un almuerzo. Esta regla, por tanto, proporciona una primera hipótesis de los tipos de **platos que se suelen solicitar dependiendo del momento del día**. Por lo tanto se trata de otra regla que en conjunción con la segunda y la tercera podrían agruparse para proporcionar diversa información de las diferentes relaciones y asociaciones de este dataset.
+A continuación se muestran las dos reglas destacadas anteriormente para conocer su composición y analizarlas en profundidad. En primer lugar, mientras que sus soportes son valores considerablemente bajos, sus confianzas y *lift* son bastante más altos, lo que nos indica que son **reglas poco frecuentes pero con cierta seguridad** de que aparezcan los consecuentes si suceden los antecedentes. La primera de ellas apuesta por la hipótesis de que si una persona adulta visita un restaurante y no conoce a ciencia cierta si pedirá postre, es probable que se trate de una mujer. Esta regla puede ser útil en tanto en cuanto demuestra **patrones alimenticios dependientes del género** ya que nos indica que las mujeres pueden ser más indecisas en relación a tomar postre tras la comida. En el caso de la segunda regla podemos observar que el **patrón se encuentra asociado al momento del día puesto** que su hipótesis predice que la comida oriental es más solicitada durante el intervalo de tarde. De nuevo, esta segunda regla parece muy interesante puesto que puede identificar el tipo de menús que prefieren los comensales dependiendo del tipo de comida que vayan a consumir, en este caso parece tratarse de un almuerzo.
 
 ```{r}
 # Subconjunto de reglas
-food.apriori.pruned.rules.subset <- subset(food.apriori.pruned.rules, 
-                     subset=lift >= 1.1 & support < 0.3 & confidence <= 0.85)
-# Longitud del subconjunto
-length(food.apriori.pruned.rules.subset)
+food.apriori.rules.subset <- subset(food.apriori.rules, 
+                      subset=lift >= 1.1 & support < 0.3 & confidence <= 0.85)
 # Mostramos las reglas obtenidas
-inspect(food.apriori.pruned.rules.subset)
+inspect(food.apriori.rules.subset)
 ```
 
-Una vez conocemos algunos de los patrones que se marcaban como objetos de estudio en este trabajo, a continuación procedemos a añadir una medida de calidad adicional para intentar obtener más respuestas acerca de las relaciones de este dataset. Para ello, después de diversos experimentos, he optado por incluir dos métricas adicionales: ***confirmedConfidence* y *leastContradiction***. La primera compara la confianza de la regla con la confianza de la misma pero negando el consecuente, mientras que la segunda medida representa el nivel de contradicción de la regla en base a las transacciones de la base de datos. Cuanto más elevados sean ambos valores, mejor será la calidad de la regla. A diferencia del conjunto anterior, estas reglas se caracterizan por **una menor longitud y un mayor soporte**, por lo que se trata de reglas que cubren un mayor porcentaje de datos y aportan información más común. 
+Con el objetivo de intentar obtener más asociaciones informativas acerca de las relaciones existentes entre los ítems, vamos a añadir dos medidas de calidad adicionales al soporte, la confianza y *lift*. La primera de ellas se denomina ***confirmedConfidence*** y representa la regla con la confianza de la misma pero negando el consecuente, mientras que la segunda se conoce como ***leastContradiction***, que calcula el nivel de contradicción de la regla en base a las transacciones de la base de datos. Cuanto más elevados sean ambos valores, mejor será la calidad de la regla. Si observamos el nuevo conjunto podemos notar que es **más numeroso que el anterior y que los soportes de las reglas han aumentado considerablemente**, lo que nos indica que este conjunto de reglas parece aportar información más común. Por contra, los valores de la confianza y el *lift* han disminuido, lo que puede representar una disminución de las ocurrencias de los consecuentes y si aparecen sus correspondientes antecedentes.
 
-Si las analizamos en grupo podemos apreciar que la mayoría son relativas a un mismo patrón que confirma la elección de **comida tradicional con zumo fresco**, algo que ya podíamos intuir desde el análisis de itemsets cerrados. Adicionalmente, como la nacionalidad india es la más común entre los entrevistados, parece ser que el algoritmo ha asociado este tipo de menú a las personas que provienen de este país. Por lo tanto si consideramos este conjunto de reglas de forma global podríamos **eliminar todas excepto las número 4 y 5** que asocian el tipo de menú con el país de origen del entrevistado.
+Si observamos la composición de las reglas, podemos apreciar que la mayoría de antecedentes y consecuentes coinciden, por lo que un **análisis en grupo** podría ser más idóneo que un estudio individualizado. Por una parte parece haber un **patrón alimenticio entre el tipo de comida y la bebida**: la comida tradicional con el zumo fresco. Mientras que por otro lado, parece que este tipo de menú es el **más popular entre los entrevistados de origen indio**. Por lo tanto, a mi parecer, este conjunto podría **reducirse a únicamente las reglas 2 y 4** que son las que contienen estas deducciones. Si bien es interesante este tipo de información para seguir conociendo el comportamiento de los comensales, como habíamos comentado anteriormente, estas conclusiones se pueden deducir del análisis exploratorio realizado anteriormente.
 
 ```{r}
 # Calculamos la confianza confirmada
-quality(food.apriori.pruned.rules)$confirmedConfidence <- interestMeasure(
-  food.apriori.pruned.rules, measure = "confirmedConfidence")
+quality(food.apriori.rules)$confirmedConfidence <- 
+    interestMeasure(food.apriori.rules, measure = "confirmedConfidence")
 # Calculamos la mínima contradicción
-quality(food.apriori.pruned.rules)$leastContradiction <- interestMeasure(
-  food.apriori.pruned.rules, measure = "leastContradiction")
+quality(food.apriori.rules)$leastContradiction <- 
+    interestMeasure(food.apriori.rules, measure = "leastContradiction")
 # Subconjunto de reglas
-inspect(subset(food.apriori.pruned.rules, 
+inspect(subset(food.apriori.rules,
                confirmedConfidence > 0.7 & leastContradiction > 0.7))
 ```
 
 ### Conclusiones
 
-Unificando la información extraída agrupando los conjuntos de reglas generados con el algoritmo Apriori, tras determinar cuáles son las más útiles y cuáles pueden ser despreciables, podemos detallar las hipótesis obtenidas y el estado de los objetivos de este proyecto.
+Unificando la información extraída anteriormente y agrupando las diferentes reglas generadas con el algoritmo Apriori y que han parecido ser más relevantes, a continuación realizamos un resumen de las hipótesis obtenidas y el estado de los objetivos de este proyecto.
 
-1. En base al primer conjunto de reglas podemos determinar que parece existir una preferencia por la **comida tradicional y el zumo fresco generalizada a los dos géneros de personas jóvenes y adultas**. Este hecho puede indicar que el menú solicitado por una persona en los restaurantes considerados no depende del género ni de la edad.
+1. En primer lugar parece existir un patrón alimenticio dependiente tanto de la composición del menú como del momento del día en el que se consume. En el primer caso parece existir una **preferencia por la combinación de comida tradicional y zumo fresco**, mientras que la hipótesis del segundo afirma que el público es **más propenso a consumir un menú oriental durante el almuerzo**.
 
-2. La **comida oriental** parece ser más solicitada durante el intervalo de la tarde por lo que parece que este tipo de menú es **más solicitado para el almuerzo** que para el resto de comidas.
+2. También hemos podido observar que los **comensales de origen indio disponen de cierta preferencia por el menú tradicional** comentado anteriormente, considerando que tanto el tipo de comida, bebida y la nacionalidad son valores mayoritarios en este dataset por lo que su representación es predominante sobre las restantes categorías.
 
-3. Finalmente podemos destacar que si bien la **nacionalidad india** es una de las más comunes en este dataset, hemos podido apreciar como se encuentra relacionada con la **comida tradicional y el zumo fresco**, por lo tanto parece que los entrevistados indios tienen cierta preferencia por este tipo de menú.
+3. Finalmente parece que se define un nuevo **patrón que relaciona la edad, el género y la decisión sobre tomar postre**. Este afirma que si se trata de una persona adulta y no sabe con seguridad si solicitará un tercer plato, es probable que sea una mujer. De ser así, el dueño de un restaurante podría estar interesado en investigar sobre los motivos de su indecisión y sobre las posibles soluciones a aplicar para animar a este colectivo al consumo del plato final.
 
 ## Algoritmo FP-growth
 
-En este apartado se pretende experimentar con el algoritmo **FP-growth** para intentar obtener un mayor número de reglas que aporten información útil a este problema particular. Para ello haremos uso del paquete `rCBA` y de la función `fpgrowth`, a la que se le proporciona la base de datos transaccional, un soporte, confianza y longitud de las reglas mínimo, además de la columna objetivo que formará parte del consecuente. Para comparar sendas técnicas, se van a aplicar los mismos valores anteriores para los umbrales de calidad. Comenzamos estudiando el momento del día estableciendo **`Timestamp` en el consecuente**. Tal y como podemos apreciar, solo existe una única regla que cumpla las condiciones impuestas de `lift >= 1.1` y `confidence >= 0.8`, la cual indica que si se solicita **comida oriental** es probable que la persona esté visitando el restaurante en el **intervalo de tarde**. Es la primera regla que contiene el otro tipo de comida disponible en el dataset por lo que puede considerarse muy importante y clarificadora de cuál es el momento del día en el que se encuentra más solicitada por los entrevistados. 
+En este apartado se pretende experimentar con el algoritmo **FP-growth** para intentar obtener conjuntos de reglas que nos ayuden a identificar nuevas relaciones y dependencias entre los ítems disponibles.  Para ello haremos uso del paquete `rCBA` y de la función `fpgrowth`, a la que se le proporciona la base de datos transaccional, un soporte y confianza mínimos, además de la longitud mínima de las reglas y la **columna objetivo que se establece como consecuente**. Para comparar sendos algoritmos, se aplicarán los mismos valores anteriores para los umbrales de calidad pero no el preprocesamiento de borrado de reglas iguales y redundantes, ya que este algoritmo produce conjuntos de reglas con mayor diferencias entre sí.
+
+Comenzamos estudiando el momento del día estableciendo **`Timestamp` en el consecuente** con el que obtenemos un conjunto con una única regla. Se trata de la misma regla que apareció anteriormente con el algoritmo Apriori que indicaba la preferencia por la **comida oriental en el intervalo de tarde**. Por lo tanto, podemos descartarla ya que conocemos esta información.
 
 ```{r}
 # Cargamos la librería para utilizar el algoritmo FP-growth
 require(rCBA)
 library(rCBA)
 # Obtenemos reglas cuyo consecuente sean ítems de `Timestamp`
-food.prep.rules2 <- fpgrowth(food.prep.trs, support=0.1, confidence=0.8, 
+food.fpg.timestamp.rules <- fpgrowth(food.prep.trs, support=0.1, confidence=0.8, 
                              maxLength=2, consequent="Timestamp")
 # Subconjunto de reglas
-inspect(food.prep.rules2)
+inspect(food.fpg.timestamp.rules)
 ```
-A continuación procedemos a estudiar la variable **`Nationality` estableciéndola como el consecuente** para obtener un conjunto de reglas que intenten expresar sus dependencias con el resto de ítems. Como era de esperar, la única nacionalidad presente es la india por ser tan sumamente predominante. Del mismo modo, tal y como conocíamos del primer conjunto de reglas, los entrevistados de este país de origen tienen preferencia por la comida tradicional y el zumo fresco. Sin embargo, un dato relevante es que acuden en **todos los intervalos el día menos en la tarde, que es cuando destaca la comida oriental**. Por lo tanto, parece que este tipo de menús se consumen en la mayor parte del día, a diferencia de la comida oriental.
-
-Adicionalmente, a pesar de que el intervalo de jóvenes es el mayoritario, de nuevo observamos que las personas de procedencia india tienen **más probabilidades de pertenecer al rango de edad adulta**. Esta características es compatible con la asociación entre el menú tradicional y el intervalo de edad adulto.
-
-Por otro lado podemos apreciar la existencia de una contradicción en dos reglas del conjunto: la cuarta regla determina que las personas de orígen indio no piden postre, mientras que la sexta abre esta posibilidad. Si analizamos sus correspondientes medidas de calidad podemos observar que **la cuarta regla** que apoya la opción negativa dispone de una **mayor confianza**, aunque **la sexta tiene asociado bastante más soporte** y ambas disponen de un valor de *lift* muy similar. En base a que la diferencia entre los soportes es mayor, en principio podríamos pensar que existe un mayor número de entrevistados asociados a esta nacionalidad que barajan la posibilidad de pedir postre tras el menú.
+A continuación establecemos la variable **`Nationality` en el consecuente** para obtener un nuevo conjunto de reglas con el mismo algoritmo y parámetros anteriores. En este caso podemos observar que todas ellas disponen de un único antecedente, por lo que se trata de reglas sencillas y fuertes. Adicionalmente, sus soportes son ínfimos, a excepción de la última regla, aunque sus confianzas son máximas. De nuevo se trata de reglas poco frecuentes pero caracterizadas por una gran seguridad. Las tres primeras relacionan la aparición de **comensales indios a los períodos de mañana y noche**. Si recordamos la información extraída anteriormente, este tipo de público solía consumir comida tradicional mayoritariamente. Al unir estas tres primeras reglas podemos determinar que el **menú tradicional suele ser preferente durante los intervalos de mañana y noche**. 
+Por otro lado, la última regla parece indicar que aproximadamente un 36% de los **entrevistados de origen indio pertenecen al intervalo de adultos** de entre 31 y 65 años. Considerando que el rango mayoritario de edad es el joven, esta información es sumamente útil puesto que lo lógico hubiese sido relacionar la nacionalidad predominante con el intervalo de edad mayoritario.
 
 ```{r}
 # Obtenemos reglas cuyo consecuente sean ítems de `Nationality`
-food.prep.rules3 <- fpgrowth(food.prep.trs, support=0.1, confidence=0.8, 
+food.fpg.nationalityrules <- fpgrowth(food.prep.trs, support=0.1, confidence=0.8, 
                              maxLength=2, consequent="Nationality")
 # Subconjunto de reglas
-inspect(subset(food.prep.rules3, subset=lift >= 1.1 | lift <= 0.9))
+inspect(subset(food.fpg.nationalityrules, subset=lift >= 1.1 | lift <= 0.9))
 ```
-Si situamos como consecuente a los ítems de la variable `Food` podemos observar que el conjunto de reglas generado proporciona prácticamente la misma información que el anterior. Por una parte confirma que la comida tradicional es más solicitada en los intervalos de mañana y madrugada, mientras que por otra apoya la hipótesis de que si es una persona adulta solicitará este tipo de menú. Sin embargo, a diferencia del conjunto anterior, en este caso existe una regla que propone que si una persona **no pide postre es probablemente porque ha solicitado comida tradicional**. Una de las posibles razones explicativas podría basarse en que la mayoría de adultos, independientemente de la nacionalidad, no piden postre al tomar comida tradicional. No obstante, existe un 36% de casos en los que los entrevistados, si son de origen indio, tienden a ser más indecisos.
+
+Si situamos a la variable **`Food`como consecuente** podemos apreciar que este tercer conjunto de reglas contiene información que ya conocíamos gracias al caso anterior. Por un lado confirma el consumo de comida tradicional durante el intervalo de mañana y la madrugada, mientras que por otra parte se refuerza la teoría de que son los adultos los que consumen el menú tradicional. No obstante, la tercera regla es sumamente informativa puesto que representa un patrón importante que asocia el **no pedir postre con el consumo de comida tradicional**. Esta regla se caracteriza por disponer de un soporte más alto que las restantes y por una confianza y *lift* bastante altos como para determinar que existe una relación entre sendos ítems. Si consideramos que la comida tradicional suele ser preferible durante el intervalo de mañana entre las 6 AM y las 12 AM, puede ser lógico pensar que **durante el desayuno no se consume postre**. Sin embargo, parece que **esta tendencia también se repite para la cena**, por lo tanto puede ser un punto interesante para realizar un análisis de los motivos que llevan a un comensal a no pedir el tercer plato y actuar en consecuencia para fomentar este consumo.
 
 ```{r}
 # Obtenemos reglas cuyo consecuente sean ítems de `Food`
-food.prep.rules4 <- fpgrowth(food.prep.trs, support=0.1, confidence=0.8, 
+food.fpg.food.rules <- fpgrowth(food.prep.trs, support=0.1, confidence=0.8, 
                              maxLength=2, consequent="Food")
 # Subconjunto de reglas
-inspect(subset(food.prep.rules4, subset=lift >= 1.1 | lift <= 0.9))
+inspect(subset(food.fpg.food.rules, subset=lift >= 1.1 | lift <= 0.9))
 ```
 
-Finalmente procedemos a obtener un conjunto de reglas en el que el consecuente sean los ítems relacionados con la columna **`Juice`**. Tras filtrarlas según la medida de calidad *lift* podemos apreciar que existen dos reglas de elevada confianza pero bajo soporte. La primera de ellas representa la hipótesis de que si una persona visita un restaurante **por la mañana, pedirá jugo fresco**. Al agrupar esta regla en los anteriores conjuntos, podemos observar que la teoría del consumo de comida tradicional y zumo fresco durante la mañana se refuerza. Del mismo modo ocurre con la segunda regla, y es que si la agrupamos también al conjunto de reglas conocidas, es lógico pensar que si el zumo se consume para desayunar no se solicite postre.
+Finalmente generamos el último conjunto de reglas mediante el algoritmo FP-growth estableciendo la variable **`Juice` como consecuente**. Tras filtrar según la confianza y la medida de calidad *lift* como en los casos anteriores, podemos apreciar la existencia de dos reglas cuya información ya es conocida. La primera afirma que durante el **intervalo de mañana se consume jugo fresco**. Esta preferencia la conocíamos puesto que entre las 6 AM y las 12 AM se consume el menú tradicional que va acompañado de jugo fresco. Mientras que la segunda regla indica que un comensal **no pide postre si solicita jugo fresco**. De nuevo esta información es conocida puesto que anteriormente hemos comprobado cómo los entrevistados rechazan pedir el tercer plato si consumen el menú tradicional con el jugo fresco. Por lo tanto, **ambas reglas parecen ser despreciables**.
 
 ```{r}
-# Obtenemos reglas cuyo consecuente sean ítems de `Food`
-food.prep.rules5 <- fpgrowth(food.prep.trs, support=0.1, confidence=0.8, 
+# Obtenemos reglas cuyo consecuente sean ítems de `Juice`
+food.fpg.juice.rules <- fpgrowth(food.prep.trs, support=0.1, confidence=0.8, 
                              maxLength=2, consequent="Juice")
 # Subconjunto de reglas
-inspect(subset(food.prep.rules5, subset=lift >= 1.1 | lift <= 0.9))
+inspect(subset(food.fpg.juice.rules, subset=lift >= 1.1 | lift <= 0.9))
 ```
 ### Conclusiones
 
-En este subapartado, de nuevo, se exponen las conclusiones que se pueden obtener a partir de los análisis de reglas de sendos algoritmos para continuar respondiendo a las preguntas objetivo de este trabajo. 
+En este subapartado, de nuevo, se exponen las conclusiones que se pueden obtener al añadir la información obtenida mediante la extracción de reglas con el algoritmo FP-growth a las hipótesis observadas con el primer algoritmo Apriori. 
 
-1. Tras la extracción de reglas utilizando el algoritmo FP-growth podemos intuir que la **comida tradicional se solicita durante la mañana, noche y madrugada, mientras que la comida oriental es más popular por la tarde**. Esto nos indica que puede existir un asociación entre el tipo de comida y el momento del día por el cual el último menú es preferido para almorzar que para otra ingesta.
+1. En primer lugar podemos determinar que la comida tradicional con zumo fresco se suele servir durante los intervalos de mañana y noche, mientras que la comida oriental está más solicitada durante el intervalo de tarde. Por lo tanto ya disponemos de un posible **patrón que relaciona el tipo de menú con el momento del día** en el que se prefiere consumir.
 
-2. Asociada a la conclusión anterior también existe la hipótesis de que si una persona solicita comida tradicional no pide postre. Esta idea puede ser intuitiva puesto que conocemos que este tipo de desgutación suele realizarse en horario de mañana y noche. Sin embargo, considerando que en este último se incluye la **cena** podemos determinar que es probable que una persona **no pida postre** en una de las últimas comidas del día, aunque pueden existir **más dudas en caso de que sea de origen indio**.
+2. Adicionalmente parece que si se opta por el **menú tradicional no se consume postre**. Como hemos comentado anteriormente, si se trata de desayunos es lógico pensar que los comensales no solicitan este tercer plato. Sin embargo, al aparecer también durante la cena puede suponer un caso de **estudio específico para fomentar su consumo** durante esta comida. Si recordamos una de las hipótesis obtenidas con el primer algoritmo, parece ser que las **mujeres adultas son las que se encuentran más indecisas** en relación al tercer plato. Por lo tanto, podemos intuir que es probable que sea **el género opuesto, el masculino, el que rechace con determinación el consumo de postre**.
 
-## Inclusión de ítems negados
+## Inclusión de ítems negativos
 
+Tras realizar diversas extracciones de reglas mediante la aplicación de los algoritmos Apriori y FP-growth sobre el dataset preprocesado, a continuación presentamos una reproducción de los análisis anteriores con la **inclusión de ítems negativos**. El proceso para su generación es similar a la binarización de una variable, en el que se crea una nueva columna por cada posible valor y se indica la existencia de cada uno mediante números binarios. Una de las variables que más se prestan al significado de los ítems negativos es la columna **`Food`, que representa si una persona escoge un menú o el contrario**. Mientras que otra de las columnas más propensas a esta experimentación podría ser **`Dessert` puesto que contiene las tres posibles decisiones** en relación al consumo de postre tras la comida principal.
+
+Una vez disponemos de un nuevo dataset con las dos columnas anteriores transformadas, lo convertimos en una base de datos transaccional con la que comenzar a analizar sus ítems. Como podemos visualizar tanto en el resumen como en el gráfico de los 20 ítems más frecuentes, este conjunto de transacciones es prácticamente idéntico al anterior, a excepción de las nuevas columnas *dummies*.
+
+```{r}
+# Cargamos la librería que nos permite transformar una columna en dummy
+require(fastDummies)
+library(fastDummies)
+# Creamos un nuevo dataset preprocesado con las columnas dummificadas
+food.prep.dumm.df <- dummy_cols(food.prep.df, c('Food', 'Dessert'), 
+                                remove_selected_columns=TRUE)
+# Cambiamos el nombre de las columnas a otros más sencillos
+colnames(food.prep.dumm.df) <- c('Timestamp', 'Gender', 'Nationality', 
+       'Age', 'Juice', 'TraditionalFood', 'WesternFood', 'DessertMaybe', 
+       'DessertNo', 'DessertYes')
+# Convertimos los valores binarios a lógicos
+food.prep.dumm.df[6:ncol(food.prep.dumm.df)] <- 
+        sapply(c(6:ncol(food.prep.dumm.df)), 
+        function(x) as.logical(food.prep.dumm.df[, x]))
+# Transformamos el nuevo dataset a transacciones
+food.prep.dumm.trs <- as(food.prep.dumm.df, "transactions")
+summary(food.prep.dumm.trs)
+# Representación de los 20 ítems más frecuentes
+itemFrequencyPlot(food.prep.dumm.trs, topN=20, cex.names=0.8)
+```
+A continuación generamos el primer conjunto de reglas incluyendo ítems negativos mediante el algoritmo Apriori con los mismos parámetros y preprocesamiento aplicados hasta el momento. Como era de esperar, **si el conjunto de transacciones es prácticamente igual al primero sin incluir los ítems negativos, el conjunto de reglas obtenido también es considerablemente similar**. De hecho, si observamos el gráfico que representa las 66 reglas resultantes tras el preprocesamiento, podemos apreciar que las reglas destacables son las mismas que las analizadas anteriormente.
+
+```{r}
+# Extracción de reglas con el algoritmo Apriori con soporte mínimo de 0.1, 
+# confianza mínima de 0.8 y longitud mínima de 2.
+food.apriori.neg.rules <- apriori(food.prep.dumm.trs, 
+                        parameter=list(support=0.1, confidence=0.8, minlen=2))
+# Ordenamos las reglas según la confianza
+food.apriori.neg.rules <- sort(food.apriori.neg.rules, by="confidence")
+# Obtenemos los itemsets que han generado las reglas
+food.apriori.neg.itemsets <- generatingItemsets(food.apriori.neg.rules)
+food.apriori.equal.neg.rules <- which(duplicated(food.apriori.neg.itemsets))
+# Descartamos aquellas reglas que sean iguales 
+# o muy similares en el antecedente
+food.apriori.neg.rules <- food.apriori.neg.rules[-food.apriori.equal.neg.rules]
+# Obtenemos las reglas reglas que son redundantes
+food.apriori.neg.redundant <- is.redundant(x=food.apriori.neg.rules, measure = "confidence")
+# Descartamos las reglas redundantes
+food.apriori.neg.rules <- food.apriori.neg.rules[!food.apriori.neg.redundant] 
+# Resumen de las reglas finales
+summary(food.apriori.neg.rules)
+# Representamos gráficamente las reglas podadas visualizando sus soportes,
+# confianzas y lift
+plot(food.apriori.neg.rules, jitter=0)
+```
+
+Tras experimentar con diferentes medidas de calidad para este nuevo conjunto de reglas con ítems negativos,a la métrica con la que se han obtenido reglas más interesantes se conoce como el **índice de implicación**. Se trata de una variante de la similitud de Lerman cuya fórmula contiene el consecuente negado. Cuanto más alejado se encuentre de 0, mayor dependencia existe entre el antecedente y el consecuente. 
+
+Tal y como se observa en los resultados, **la primera regla** ya ha aparecido en análisis anteriores por lo que **puede ser descartada**. Sin embargo la segunda afirma que si un comensal pertenece al intervalo de jóvenes, tiene un 85% de seguridad de solicitar zumo fresco. Si recordamos que este tipo de bebida está asociada a la comida tradicional, podemos intuir que los entrevistados **más jóvenes también consumen este tipo de menú**, y por ende, son aplicables todas las conclusiones extraídas anteriormente acerca del consumo de postre y del momento del día. Adicionalmente, la tercera regla parece indicar que el género masculino también consume este tipo de bebida con un 85% de confianza y un 1.52 del índice de implicación, además de su alto soporte. Esto nos puede indicar que **no existe diferencias entre los menús que consumen ambos géneros**.
+
+Finalmente las cuarta regla parece contradecir la teoría anterior de que al consumir comida tradicional y zumo fresco no era de esperar que el comensal solicitase postre. A diferencia de la regla que considera el hecho de no tomar postre, esta cuarta regla dispone de un **soporte más alto aunque una menor confianza**. Estas medidas indican que existen un mayor número de encuestados que sí se solicitan el tercer plato aunque también simboliza una **relación más débil entre el antecedente y el consecuente**. Una situación similar ocurre con la última regla que también rompe la teoría de que los comensales de origen indio tampoco solicitaban postre tras consumir el menú tradicional con zumo fresco. La única excepción podía ser el caso de las mujeres adultas que parecían estar más indecisas. El hecho de que el consumo de postre pueda ser más predominante en este dataset concreto no significa que esta tendencia se cumpla para el resto de comensales no entrevistados. Por lo tanto, a mi parecer, seguiría considerando más en serio la situación en la cual el **tercer plato no es solicitado puesto que la probabilidad de acierto es bastante mayor** que la que proponen estas dos últimas reglas.
+
+```{r}
+# Calculamos una variación de la similitud de Lerman
+quality(food.apriori.neg.rules)$implicationIndex <- 
+    interestMeasure(food.apriori.neg.rules, measure = "implicationIndex")
+# Subconjunto de reglas
+inspect(subset(food.apriori.neg.rules, subset=implicationIndex > 0.5))
+```
 ## Otros algoritmos
 
+# Conclusiones finales
